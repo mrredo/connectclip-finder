@@ -10,9 +10,17 @@ import (
 
 // FormatTelegramMessage formats a listing into a clean, readable HTML Telegram message.
 func FormatTelegramMessage(l *model.Listing) string {
+	return FormatTelegramMessageWithTarget(l, "Oticon ConnectClip")
+}
+
+// FormatTelegramMessageWithTarget formats a listing into a clean, readable HTML Telegram message with dynamic target name.
+func FormatTelegramMessageWithTarget(l *model.Listing, targetName string) string {
+	if targetName == "" {
+		targetName = "Oticon ConnectClip"
+	}
 	var sb strings.Builder
 
-	sb.WriteString("🚨 <b>Possible Oticon ConnectClip Found!</b>\n\n")
+	sb.WriteString(fmt.Sprintf("🚨 <b>Possible %s Found!</b>\n\n", html.EscapeString(targetName)))
 
 	sb.WriteString(fmt.Sprintf("🏷️ <b>Source:</b> %s\n", html.EscapeString(string(l.Source))))
 	sb.WriteString(fmt.Sprintf("📋 <b>Title:</b> %s\n", html.EscapeString(l.Title)))

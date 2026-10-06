@@ -10,10 +10,28 @@ type Matcher struct {
 	rules []Rule
 }
 
-// NewMatcher creates a new deterministic matching engine.
+// NewMatcher creates a new deterministic matching engine with default Oticon ConnectClip rules.
 func NewMatcher() *Matcher {
 	return &Matcher{
 		rules: BuildRules(),
+	}
+}
+
+// NewCustomMatcher creates a matching engine customized for a specific target product,
+// falling back to standard rules if no custom keywords are specified.
+func NewCustomMatcher(
+	targetName string,
+	exactKeywords []string,
+	contextKeywords []string,
+	modelNumbers []string,
+	excludeKeywords []string,
+	minPrice, maxPrice float64,
+) *Matcher {
+	if len(exactKeywords) == 0 && len(modelNumbers) == 0 && len(contextKeywords) == 0 {
+		return NewMatcher()
+	}
+	return &Matcher{
+		rules: BuildCustomRules(targetName, exactKeywords, contextKeywords, modelNumbers, excludeKeywords, minPrice, maxPrice),
 	}
 }
 

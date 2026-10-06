@@ -47,6 +47,15 @@ type Config struct {
 	HTTPEnabled bool
 	HTTPAddr    string
 
+	// Target item configuration
+	TargetName           string
+	TargetMinPrice       float64
+	TargetMaxPrice       float64
+	MatchExactKeywords   []string
+	MatchContextKeywords []string
+	MatchModelNumbers    []string
+	MatchExcludeKeywords []string
+
 	// Search queries to use
 	SearchTerms []string
 }
@@ -69,45 +78,43 @@ func Load(envPath string) (*Config, error) {
 		minAlertScore = 70
 	}
 
-	termsStr := getEnv("SEARCH_TERMS", "")
-	var terms []string
-	if termsStr != "" {
-		for _, t := range strings.Split(termsStr, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				terms = append(terms, t)
-			}
-		}
-	}
+	terms := getEnvSlice("SEARCH_TERMS")
 	if len(terms) == 0 {
 		terms = DefaultSearchTerms()
 	}
 
 	cfg := &Config{
-		ScanInterval:        scanInterval,
-		MinAlertScore:       minAlertScore,
-		DBPath:              getEnv("DB_PATH", "data/connectclip.db"),
-		LogLevel:            getEnv("LOG_LEVEL", "info"),
-		TelegramBotToken:    getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramChatID:      getEnv("TELEGRAM_CHAT_ID", ""),
-		LLMEnabled:          getEnvBool("LLM_ENABLED", false),
-		LLMProvider:         getEnv("LLM_PROVIDER", "gemini"),
-		LLMAPIKey:           getEnv("LLM_API_KEY", ""),
-		LLMModel:            getEnv("LLM_MODEL", "gemini-2.0-flash"),
-		SSComEnabled:        getEnvBool("SSCOM_ENABLED", true),
-		VitaLombardsEnabled: getEnvBool("VITALOMBARDS_ENABLED", true),
-		VintedEnabled:       getEnvBool("VINTED_ENABLED", true),
-		VintedSessionCookie: getEnv("VINTED_SESSION_COOKIE", ""),
-		VintedUserAgent:     getEnv("VINTED_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-		BanknoteEnabled:     getEnvBool("BANKNOTE_ENABLED", true),
-		BanknoteCookies:     getEnv("BANKNOTE_COOKIES", ""),
-		AndeleEnabled:       getEnvBool("ANDELE_ENABLED", true),
-		AndeleCookies:       getEnv("ANDELE_COOKIES", ""),
-		FBEnabled:           getEnvBool("FB_ENABLED", false),
-		FBCookies:           getEnv("FB_COOKIES", ""),
-		HTTPEnabled:         getEnvBool("HTTP_ENABLED", true),
-		HTTPAddr:            getEnv("HTTP_ADDR", ":8080"),
-		SearchTerms:         terms,
+		ScanInterval:         scanInterval,
+		MinAlertScore:        minAlertScore,
+		DBPath:               getEnv("DB_PATH", "data/connectclip.db"),
+		LogLevel:             getEnv("LOG_LEVEL", "info"),
+		TelegramBotToken:     getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramChatID:       getEnv("TELEGRAM_CHAT_ID", ""),
+		LLMEnabled:           getEnvBool("LLM_ENABLED", false),
+		LLMProvider:          getEnv("LLM_PROVIDER", "gemini"),
+		LLMAPIKey:            getEnv("LLM_API_KEY", ""),
+		LLMModel:             getEnv("LLM_MODEL", "gemini-2.0-flash"),
+		SSComEnabled:         getEnvBool("SSCOM_ENABLED", true),
+		VitaLombardsEnabled:  getEnvBool("VITALOMBARDS_ENABLED", true),
+		VintedEnabled:        getEnvBool("VINTED_ENABLED", true),
+		VintedSessionCookie:  getEnv("VINTED_SESSION_COOKIE", ""),
+		VintedUserAgent:      getEnv("VINTED_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		BanknoteEnabled:      getEnvBool("BANKNOTE_ENABLED", true),
+		BanknoteCookies:      getEnv("BANKNOTE_COOKIES", ""),
+		AndeleEnabled:        getEnvBool("ANDELE_ENABLED", true),
+		AndeleCookies:        getEnv("ANDELE_COOKIES", ""),
+		FBEnabled:            getEnvBool("FB_ENABLED", false),
+		FBCookies:            getEnv("FB_COOKIES", ""),
+		HTTPEnabled:          getEnvBool("HTTP_ENABLED", true),
+		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
+		TargetName:           getEnv("TARGET_NAME", "Oticon ConnectClip"),
+		TargetMinPrice:       getEnvFloat("TARGET_MIN_PRICE", 30),
+		TargetMaxPrice:       getEnvFloat("TARGET_MAX_PRICE", 200),
+		MatchExactKeywords:   getEnvSlice("MATCH_EXACT_KEYWORDS"),
+		MatchContextKeywords: getEnvSlice("MATCH_CONTEXT_KEYWORDS"),
+		MatchModelNumbers:    getEnvSlice("MATCH_MODEL_NUMBERS"),
+		MatchExcludeKeywords: getEnvSlice("MATCH_EXCLUDE_KEYWORDS"),
+		SearchTerms:          terms,
 	}
 
 	return cfg, nil
@@ -125,6 +132,33 @@ func DefaultSearchTerms() []string {
 		"Oticon streamer",
 		"178509",
 	}
+}
+
+func getEnvSlice(key string) []string {
+	val := getEnv(key, "")
+	if val == "" {
+		return nil
+	}
+	var res []string
+	for _, part := range strings.Split(val, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			res = append(res, part)
+		}
+	}
+	return res
+}
+
+func getEnvFloat(key string, defaultVal float64) float64 {
+	val := getEnv(key, "")
+	if val == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return f
 }
 
 func getEnv(key, defaultVal string) string {

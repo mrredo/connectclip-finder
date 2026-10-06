@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -22,16 +21,22 @@ type Server struct {
 	repo          *storage.Repository
 	sched         *scheduler.Scheduler
 	minAlertScore int
+	targetName    string
 	httpServer    *http.Server
 }
 
 // NewServer initializes the dashboard HTTP server.
-func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler, minAlertScore int) *Server {
+func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler, minAlertScore int, targetName ...string) *Server {
+	tName := "Oticon ConnectClip"
+	if len(targetName) > 0 && targetName[0] != "" {
+		tName = targetName[0]
+	}
 	s := &Server{
 		addr:          addr,
 		repo:          repo,
 		sched:         sched,
 		minAlertScore: minAlertScore,
+		targetName:    tName,
 	}
 
 	mux := http.NewServeMux()
@@ -64,6 +69,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 type dashboardData struct {
+	TargetName    string
 	TotalListings int
 	Candidates    int
 	Notified      int
@@ -71,6 +77,10 @@ type dashboardData struct {
 	Listings      []*model.Listing
 	Sources       []string
 	LastUpdated   string
+	Page          int
+	PageSize      int
+	TotalPages    int
+	MatchedCount  int
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -85,38 +95,62 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Failed to fetch dashboard stats", "error", err)
 	}
 
-	minScore := 0
-	if q := r.URL.Query().Get("min_score"); q != "" {
-		minScore, _ = strconv.Atoi(q)
+	sources, _ := s.repo.GetAllSources(ctx)
+
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
 	}
 
-	listings, err := s.repo.GetAllListings(ctx, minScore)
+	pageSize := 50
+	if ps := r.URL.Query().Get("per_page"); ps != "" {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 {
+			pageSize = v
+		}
+	}
+
+	filter := storage.ListingFilter{
+		Query:     r.URL.Query().Get("q"),
+		Source:    r.URL.Query().Get("source"),
+		Status:    r.URL.Query().Get("status"),
+		PhotoOnly: r.URL.Query().Get("photo") == "1" || r.URL.Query().Get("photo") == "true",
+		SortCol:   r.URL.Query().Get("sort"),
+		SortDir:   r.URL.Query().Get("dir"),
+		Page:      page,
+		PageSize:  pageSize,
+	}
+	if q := r.URL.Query().Get("min_score"); q != "" {
+		filter.MinScore, _ = strconv.Atoi(q)
+	}
+	if p := r.URL.Query().Get("min_price"); p != "" {
+		filter.MinPrice, _ = strconv.ParseFloat(p, 64)
+	}
+	if p := r.URL.Query().Get("max_price"); p != "" {
+		filter.MaxPrice, _ = strconv.ParseFloat(p, 64)
+	}
+
+	pagedResult, err := s.repo.GetListingsPaged(ctx, filter)
 	if err != nil {
 		slog.Error("Failed to fetch listings for dashboard", "error", err)
 		http.Error(w, "Failed to load listings", http.StatusInternalServerError)
 		return
 	}
 
-	sourceMap := make(map[string]bool)
-	for _, l := range listings {
-		if l.Source != "" {
-			sourceMap[string(l.Source)] = true
-		}
-	}
-	var sources []string
-	for src := range sourceMap {
-		sources = append(sources, src)
-	}
-	sort.Strings(sources)
-
 	data := dashboardData{
+		TargetName:    s.targetName,
 		TotalListings: total,
 		Candidates:    candidates,
 		Notified:      notified,
 		MinAlertScore: s.minAlertScore,
-		Listings:      listings,
+		Listings:      pagedResult.Listings,
 		Sources:       sources,
 		LastUpdated:   time.Now().Format("15:04:05 02.01.2006"),
+		Page:          pagedResult.Page,
+		PageSize:      pagedResult.PageSize,
+		TotalPages:    pagedResult.TotalPages,
+		MatchedCount:  pagedResult.TotalCount,
 	}
 
 	tmpl, err := template.New("dashboard").Parse(dashboardHTML)
@@ -132,19 +166,70 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPIListings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	minScore := 0
-	if q := r.URL.Query().Get("min_score"); q != "" {
-		minScore, _ = strconv.Atoi(q)
+	q := r.URL.Query()
+
+	// If no page/limit/paged requested (backward compatible with unmarshaling []*model.Listing in tests)
+	if q.Get("page") == "" && q.Get("paged") != "true" && q.Get("limit") == "" {
+		minScore := 0
+		if m := q.Get("min_score"); m != "" {
+			minScore, _ = strconv.Atoi(m)
+		}
+		listings, err := s.repo.GetAllListings(ctx, minScore)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(listings)
+		return
 	}
 
-	listings, err := s.repo.GetAllListings(ctx, minScore)
+	// Paginated request
+	filter := storage.ListingFilter{
+		Query:     q.Get("q"),
+		Source:    q.Get("source"),
+		Status:    q.Get("status"),
+		PhotoOnly: q.Get("photo") == "1" || q.Get("photo") == "true",
+		SortCol:   q.Get("sort"),
+		SortDir:   q.Get("dir"),
+		Page:      1,
+		PageSize:  50,
+	}
+	if p := q.Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			filter.Page = v
+		}
+	}
+	if ps := q.Get("limit"); ps != "" {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 {
+			filter.PageSize = v
+		}
+	} else if ps := q.Get("per_page"); ps != "" {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 {
+			filter.PageSize = v
+		}
+	}
+	if m := q.Get("min_score"); m != "" {
+		filter.MinScore, _ = strconv.Atoi(m)
+	}
+	if m := q.Get("max_score"); m != "" {
+		filter.MaxScore, _ = strconv.Atoi(m)
+	}
+	if p := q.Get("min_price"); p != "" {
+		filter.MinPrice, _ = strconv.ParseFloat(p, 64)
+	}
+	if p := q.Get("max_price"); p != "" {
+		filter.MaxPrice, _ = strconv.ParseFloat(p, 64)
+	}
+
+	res, err := s.repo.GetListingsPaged(ctx, filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(listings)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func (s *Server) handleAPITriggerScan(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +255,7 @@ const dashboardHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ConnectClip Finder - Marketplace Monitor</title>
+<title>{{.TargetName}} Finder - Marketplace Monitor</title>
 <style>
   :root {
     --bg: #0f172a;
@@ -624,8 +709,8 @@ const dashboardHTML = `<!DOCTYPE html>
 <div class="container">
   <header>
     <div>
-      <h1>ConnectClip Finder <span class="badge-oticon" data-i18n="badge_oticon">Oticon Monitor</span></h1>
-      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;" id="subtitleText">Tracking Latvian marketplaces for lost Oticon ConnectClip • Updated {{.LastUpdated}}</p>
+      <h1>{{.TargetName}} Finder <span class="badge-oticon" data-i18n="badge_oticon">Marketplace Monitor</span></h1>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;" id="subtitleText">Tracking Latvian marketplaces for {{.TargetName}} • Updated {{.LastUpdated}}</p>
     </div>
     <div class="actions">
       <!-- Language Switcher -->
@@ -663,7 +748,7 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="controls-row">
       <div class="search-wrap">
         <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="search_placeholder" placeholder="Search title, description, location, signals..." onkeyup="applyFilters()">
+        <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="search_placeholder" placeholder="Search title, description, location, signals..." oninput="onSearchInput()">
       </div>
 
       <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -724,7 +809,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
       <!-- Live Counter -->
       <div class="result-counter" id="visibleCounterWrapper">
-        Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{len .Listings}} listings
+        Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{.MatchedCount}} listings
       </div>
     </div>
 
@@ -1015,13 +1100,331 @@ const i18n = {
 
 let currentLang = 'en';
 
-// Display & Pagination State
+// State
 let currentViewMode = 'pagination'; // 'pagination' or 'infinite'
-let currentPage = 1;
-let pageSize = 50;
-let infiniteVisibleLimit = 50;
-let isInfiniteLoading = false;
-let matchedRows = [];
+let currentPage = {{.Page}};
+let pageSize = {{.PageSize}};
+let totalMatched = {{.MatchedCount}};
+let totalPages = {{.TotalPages}};
+let currentSortCol = 'score';
+let currentSortDir = 'desc';
+let currentScorePreset = 'all';
+let isFetching = false;
+let currentAbortController = null;
+let searchDebounceTimer = null;
+
+function escapeHTML(str) {
+  if (!str) return '';
+  return String(str).replace(/[&<>'"]/g, tag => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  }[tag] || tag));
+}
+
+function formatDate(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '';
+  const pad = function(n) { return String(n).padStart(2, '0'); };
+  return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function buildRowHTML(l) {
+  const isHigh = l.score >= 75;
+  const isMed = l.score >= 50 && l.score < 75;
+  const scoreClass = isHigh ? 'score-high' : (isMed ? 'score-medium' : 'score-low');
+  let scoreBadge = '';
+  if (currentLang === 'lv') {
+    scoreBadge = '<span class="score-badge ' + scoreClass + '">' + l.score + '% ' + (isHigh ? 'AUGSTA' : isMed ? 'VIDĒJA' : 'ZEMA') + '</span>';
+  } else {
+    scoreBadge = '<span class="score-badge ' + scoreClass + '">' + l.score + '% ' + (isHigh ? 'HIGH' : isMed ? 'MED' : 'LOW') + '</span>';
+  }
+
+  const primaryImage = (l.image_urls && l.image_urls.length > 0) ? l.image_urls[0] : '';
+  const photoCell = primaryImage
+    ? '<img src="' + escapeHTML(primaryImage) + '" alt="" class="thumb" onerror="this.style.display=\'none\'">'
+    : '<div class="no-img">' + (currentLang === 'lv' ? 'Nav foto' : 'No img') + '</div>';
+
+  const priceFormatted = l.price > 0 ? ('€' + l.price.toFixed(2)) : '<span style="color: var(--text-muted); font-size: 0.85rem;">—</span>';
+  const descHTML = l.description ? '<div class="item-desc">' + escapeHTML(l.description) + '</div>' : '';
+  const locText = escapeHTML(l.location || 'Latvija');
+
+  let reasonsHTML = '';
+  if (l.match_reasons && l.match_reasons.length > 0) {
+    reasonsHTML = l.match_reasons.map(function(r) { return '<div>• ' + escapeHTML(r) + '</div>'; }).join('');
+  }
+
+  const statusHTML = l.notified
+    ? '<span class="notified-tag">' + (currentLang === 'lv' ? '🚨 Paziņots' : '🚨 Alerted') + '</span>'
+    : '<span style="color: var(--text-muted); font-size: 0.75rem;">—</span>';
+
+  return '<tr class="listing-row" ' +
+    'data-score="' + l.score + '" ' +
+    'data-title="' + escapeHTML(l.title) + '" ' +
+    'data-source="' + escapeHTML(l.source) + '" ' +
+    'data-price="' + l.price + '" ' +
+    'data-location="' + locText + '" ' +
+    'data-signals="' + (l.match_reasons ? l.match_reasons.length : 0) + '" ' +
+    'data-time="' + (l.last_seen_at ? new Date(l.last_seen_at).getTime() / 1000 : 0) + '" ' +
+    'data-status="' + (l.notified ? '1' : '0') + '" ' +
+    'data-photo="' + (primaryImage ? '1' : '0') + '">' +
+    '<td>' + photoCell + '</td>' +
+    '<td>' + scoreBadge + '</td>' +
+    '<td>' +
+      '<a href="' + escapeHTML(l.url) + '" target="_blank" rel="noopener noreferrer" class="item-title">' + escapeHTML(l.title) + '</a>' +
+      descHTML +
+    '</td>' +
+    '<td><span class="source-tag">' + escapeHTML(l.source) + '</span></td>' +
+    '<td><div class="price">' + priceFormatted + '</div></td>' +
+    '<td style="color: var(--text-muted); font-size: 0.85rem;">' + locText + '</td>' +
+    '<td><div class="reasons">' + reasonsHTML + '</div></td>' +
+    '<td class="time-cell">' + formatDate(l.last_seen_at) + '</td>' +
+    '<td>' + statusHTML + '</td>' +
+  '</tr>';
+}
+
+function fetchPage(targetPage, appendRows) {
+  if (typeof appendRows === 'undefined') appendRows = false;
+  if (isFetching && appendRows) return;
+  if (currentAbortController && !appendRows) {
+    currentAbortController.abort();
+  }
+  currentAbortController = new AbortController();
+
+  isFetching = true;
+  const spinner = document.getElementById('infiniteSpinner');
+  const tableEl = document.getElementById('listingsTable');
+
+  if (appendRows) {
+    if (spinner) spinner.style.display = 'inline-block';
+  } else {
+    if (tableEl) tableEl.style.opacity = '0.5';
+  }
+
+  const query = (document.getElementById('searchInput').value || '').trim();
+  const source = document.getElementById('sourceFilter').value || '';
+  const status = document.getElementById('statusFilter').value || '';
+  const photo = document.getElementById('photoFilter').checked ? '1' : '';
+  const minPrice = document.getElementById('minPrice').value || '';
+  const maxPrice = document.getElementById('maxPrice').value || '';
+
+  let minScore = '';
+  let maxScore = '';
+  if (currentScorePreset === 'candidates') {
+    minScore = String(minAlertThreshold);
+  } else if (currentScorePreset === 'med') {
+    minScore = '50';
+  } else if (currentScorePreset === 'high') {
+    minScore = '75';
+  } else if (currentScorePreset === 'low') {
+    maxScore = '49';
+  }
+
+  const params = new URLSearchParams({
+    paged: 'true',
+    page: String(targetPage),
+    limit: String(pageSize),
+    sort: currentSortCol,
+    dir: currentSortDir
+  });
+  if (query) params.set('q', query);
+  if (source) params.set('source', source);
+  if (status) params.set('status', status);
+  if (photo) params.set('photo', photo);
+  if (minPrice) params.set('min_price', minPrice);
+  if (maxPrice) params.set('max_price', maxPrice);
+  if (minScore) params.set('min_score', minScore);
+  if (maxScore) params.set('max_score', maxScore);
+
+  fetch('/api/listings?' + params.toString(), { signal: currentAbortController.signal })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      isFetching = false;
+      if (tableEl) tableEl.style.opacity = '1';
+      if (spinner) spinner.style.display = 'none';
+
+      const tbody = document.querySelector('#listingsTable tbody');
+      const noResultsRow = document.getElementById('noResultsRow');
+
+      currentPage = data.page;
+      totalMatched = data.total;
+      totalPages = data.total_pages;
+
+      if (!appendRows) {
+        tbody.querySelectorAll('tr.listing-row').forEach(function(r) { r.remove(); });
+      }
+
+      if (data.items && data.items.length > 0) {
+        if (noResultsRow) noResultsRow.style.display = 'none';
+        const rowsHTML = data.items.map(buildRowHTML).join('');
+        if (noResultsRow) {
+          noResultsRow.insertAdjacentHTML('beforebegin', rowsHTML);
+        } else {
+          tbody.insertAdjacentHTML('beforeend', rowsHTML);
+        }
+      } else if (!appendRows) {
+        if (noResultsRow) noResultsRow.style.display = '';
+      }
+
+      renderUI();
+
+      if (!appendRows && targetPage > 1) {
+        tableEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    })
+    .catch(function(err) {
+      if (err.name === 'AbortError') return;
+      isFetching = false;
+      if (tableEl) tableEl.style.opacity = '1';
+      if (spinner) spinner.style.display = 'none';
+      console.error('Fetch error:', err);
+    });
+}
+
+function renderUI() {
+  const dict = i18n[currentLang];
+  const paginationContainer = document.getElementById('paginationContainer');
+  const infiniteContainer = document.getElementById('infiniteContainer');
+  const counterWrapper = document.getElementById('visibleCounterWrapper');
+  const viewModeInfo = document.getElementById('viewModeInfo');
+
+  const currentlyLoadedCount = document.querySelectorAll('#listingsTable tbody tr.listing-row').length;
+
+  if (currentViewMode === 'pagination') {
+    if (paginationContainer) paginationContainer.style.display = 'flex';
+    if (infiniteContainer) infiniteContainer.style.display = 'none';
+
+    renderPaginationNav(currentPage, totalPages);
+
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + currentlyLoadedCount, totalMatched);
+    const dispRange = totalMatched > 0 ? (startIndex + 1) + '–' + endIndex : '0';
+
+    const paginationInfo = document.getElementById('paginationInfo');
+    if (currentLang === 'lv') {
+      if (paginationInfo) paginationInfo.innerHTML = 'Rāda <strong>' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem (' + currentPage + '. no ' + totalPages + ' lapām)';
+      if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem';
+      if (viewModeInfo) viewModeInfo.innerText = currentPage + '. no ' + totalPages + ' lapām';
+    } else {
+      if (paginationInfo) paginationInfo.innerHTML = 'Showing <strong>' + dispRange + '</strong> of ' + totalMatched + ' listings (Page ' + currentPage + ' of ' + totalPages + ')';
+      if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + dispRange + '</strong> of ' + totalMatched + ' listings';
+      if (viewModeInfo) viewModeInfo.innerText = 'Page ' + currentPage + ' of ' + totalPages;
+    }
+  } else {
+    // Infinite Scroll Mode
+    if (paginationContainer) paginationContainer.style.display = 'none';
+    if (infiniteContainer) infiniteContainer.style.display = 'flex';
+
+    const statusText = document.getElementById('infiniteStatusText');
+    const btnLoadMore = document.getElementById('btnLoadMore');
+
+    if (currentLang === 'lv') {
+      if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + currentlyLoadedCount + '</strong> no ' + totalMatched + ' sludinājumiem';
+      if (viewModeInfo) viewModeInfo.innerText = 'Ielādēti ' + currentlyLoadedCount + ' no ' + totalMatched;
+    } else {
+      if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + currentlyLoadedCount + '</strong> of ' + totalMatched + ' listings';
+      if (viewModeInfo) viewModeInfo.innerText = 'Loaded ' + currentlyLoadedCount + ' of ' + totalMatched;
+    }
+
+    if (currentlyLoadedCount >= totalMatched) {
+      if (statusText) statusText.innerText = dict.all_loaded + ' (' + totalMatched + ')';
+      if (btnLoadMore) btnLoadMore.style.display = 'none';
+    } else {
+      if (statusText) statusText.innerText = (currentLang === 'lv' ? 'Parādīti ' : 'Displayed ') + currentlyLoadedCount + ' / ' + totalMatched;
+      if (btnLoadMore) btnLoadMore.style.display = 'inline-block';
+    }
+  }
+}
+
+function renderPaginationNav(currPage, totalPgs) {
+  const nav = document.getElementById('paginationNav');
+  if (!nav) return;
+  nav.innerHTML = '';
+
+  const dict = i18n[currentLang];
+
+  // First button
+  const firstBtn = document.createElement('button');
+  firstBtn.className = 'page-btn';
+  firstBtn.innerHTML = dict.page_first;
+  firstBtn.disabled = (currPage <= 1);
+  firstBtn.onclick = () => goToPage(1);
+  nav.appendChild(firstBtn);
+
+  // Prev button
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'page-btn';
+  prevBtn.innerHTML = dict.page_prev;
+  prevBtn.disabled = (currPage <= 1);
+  prevBtn.onclick = () => goToPage(currPage - 1);
+  nav.appendChild(prevBtn);
+
+  // Pages windowing
+  let pages = [];
+  if (totalPgs <= 7) {
+    for (let p = 1; p <= totalPgs; p++) pages.push(p);
+  } else {
+    if (currPage <= 4) {
+      pages = [1, 2, 3, 4, 5, '...', totalPgs];
+    } else if (currPage >= totalPgs - 3) {
+      pages = [1, '...', totalPgs - 4, totalPgs - 3, totalPgs - 2, totalPgs - 1, totalPgs];
+    } else {
+      pages = [1, '...', currPage - 1, currPage, currPage + 1, '...', totalPgs];
+    }
+  }
+
+  pages.forEach(p => {
+    if (p === '...') {
+      const span = document.createElement('span');
+      span.className = 'page-ellipsis';
+      span.innerText = '…';
+      nav.appendChild(span);
+    } else {
+      const pageBtn = document.createElement('button');
+      pageBtn.className = 'page-btn' + (p === currPage ? ' active' : '');
+      pageBtn.innerText = p;
+      pageBtn.onclick = () => goToPage(p);
+      nav.appendChild(pageBtn);
+    }
+  });
+
+  // Next button
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'page-btn';
+  nextBtn.innerHTML = dict.page_next;
+  nextBtn.disabled = (currPage >= totalPgs);
+  nextBtn.onclick = () => goToPage(currPage + 1);
+  nav.appendChild(nextBtn);
+
+  // Last button
+  const lastBtn = document.createElement('button');
+  lastBtn.className = 'page-btn';
+  lastBtn.innerHTML = dict.page_last;
+  lastBtn.disabled = (currPage >= totalPgs);
+  lastBtn.onclick = () => goToPage(totalPgs);
+  nav.appendChild(lastBtn);
+}
+
+function goToPage(page) {
+  if (page < 1) page = 1;
+  if (totalPages > 0 && page > totalPages) page = totalPages;
+  fetchPage(page, false);
+}
+
+function onPageSizeChange() {
+  const sel = document.getElementById('pageSizeSelect');
+  if (!sel) return;
+  pageSize = parseInt(sel.value, 10) || 50;
+
+  try {
+    localStorage.setItem('cc_finder_page_size', pageSize);
+  } catch (e) {}
+
+  fetchPage(1, false);
+}
 
 function setViewMode(mode) {
   if (mode !== 'pagination' && mode !== 'infinite') return;
@@ -1035,51 +1438,15 @@ function setViewMode(mode) {
     localStorage.setItem('cc_finder_view_mode', mode);
   } catch (e) {}
 
-  currentPage = 1;
-  infiniteVisibleLimit = pageSize;
-  renderDisplay();
-}
-
-function onPageSizeChange() {
-  const sel = document.getElementById('pageSizeSelect');
-  if (!sel) return;
-  pageSize = parseInt(sel.value, 10) || 50;
-  currentPage = 1;
-  infiniteVisibleLimit = pageSize;
-
-  try {
-    localStorage.setItem('cc_finder_page_size', pageSize);
-  } catch (e) {}
-
-  renderDisplay();
-}
-
-function goToPage(page) {
-  const totalPages = Math.max(1, Math.ceil(matchedRows.length / pageSize));
-  if (page < 1) page = 1;
-  if (page > totalPages) page = totalPages;
-  currentPage = page;
-  renderDisplay();
-
-  const tableEl = document.getElementById('listingsTable');
-  if (tableEl) {
-    tableEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  fetchPage(1, false);
 }
 
 function loadMoreInfinite() {
-  if (isInfiniteLoading || infiniteVisibleLimit >= matchedRows.length) return;
-  isInfiniteLoading = true;
+  if (isFetching) return;
+  const loadedCount = document.querySelectorAll('#listingsTable tbody tr.listing-row').length;
+  if (loadedCount >= totalMatched) return;
 
-  const spinner = document.getElementById('infiniteSpinner');
-  if (spinner) spinner.style.display = 'inline-block';
-
-  setTimeout(() => {
-    infiniteVisibleLimit += pageSize;
-    isInfiniteLoading = false;
-    if (spinner) spinner.style.display = 'none';
-    renderDisplay();
-  }, 100);
+  fetchPage(currentPage + 1, true);
 }
 
 let infiniteObserver;
@@ -1091,24 +1458,116 @@ function setupInfiniteObserver() {
 
   infiniteObserver = new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && currentViewMode === 'infinite') {
-      if (infiniteVisibleLimit < matchedRows.length) {
-        loadMoreInfinite();
-      }
+      loadMoreInfinite();
     }
-  }, { rootMargin: '250px' });
+  }, { rootMargin: '300px' });
 
   infiniteObserver.observe(sentinel);
 }
 
 window.addEventListener('scroll', () => {
   if (currentViewMode !== 'infinite') return;
-  if (infiniteVisibleLimit >= matchedRows.length) return;
+  const loadedCount = document.querySelectorAll('#listingsTable tbody tr.listing-row').length;
+  if (loadedCount >= totalMatched) return;
+
   const scrollPos = window.innerHeight + window.scrollY;
-  const bottomPos = document.documentElement.offsetHeight - 300;
+  const bottomPos = document.documentElement.offsetHeight - 400;
   if (scrollPos >= bottomPos) {
     loadMoreInfinite();
   }
 }, { passive: true });
+
+function handleSort(col, headerEl) {
+  if (currentSortCol === col) {
+    currentSortDir = (currentSortDir === 'desc') ? 'asc' : 'desc';
+  } else {
+    currentSortCol = col;
+    currentSortDir = (col === 'title' || col === 'source' || col === 'location') ? 'asc' : 'desc';
+  }
+
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('active');
+    const icon = th.querySelector('.sort-icon');
+    if (icon) icon.innerText = '↕';
+  });
+
+  headerEl.classList.add('active');
+  const icon = headerEl.querySelector('.sort-icon');
+  if (icon) {
+    icon.innerText = currentSortDir === 'asc' ? '▲' : '▼';
+  }
+
+  fetchPage(1, false);
+}
+
+function setScorePreset(preset, btn) {
+  currentScorePreset = preset;
+  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  fetchPage(1, false);
+}
+
+function setPricePreset(preset, btn) {
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const minInput = document.getElementById('minPrice');
+  const maxInput = document.getElementById('maxPrice');
+
+  if (preset === 'under50') {
+    minInput.value = '';
+    maxInput.value = '50';
+  } else if (preset === '50to150') {
+    minInput.value = '50';
+    maxInput.value = '150';
+  } else if (preset === 'over150') {
+    minInput.value = '150';
+    maxInput.value = '';
+  } else {
+    minInput.value = '';
+    maxInput.value = '';
+  }
+  fetchPage(1, false);
+}
+
+function onPriceInput() {
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    fetchPage(1, false);
+  }, 300);
+}
+
+function onSearchInput() {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    fetchPage(1, false);
+  }, 250);
+}
+
+function applyFilters() {
+  fetchPage(1, false);
+}
+
+function resetFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('sourceFilter').value = '';
+  document.getElementById('statusFilter').value = '';
+  document.getElementById('photoFilter').checked = false;
+  document.getElementById('minPrice').value = '';
+  document.getElementById('maxPrice').value = '';
+
+  currentScorePreset = 'all';
+  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+  const allScoreBtn = document.getElementById('scoreBtnAll');
+  if (allScoreBtn) allScoreBtn.classList.add('active');
+
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  const allPriceBtn = document.getElementById('priceBtnAll');
+  if (allPriceBtn) allPriceBtn.classList.add('active');
+
+  fetchPage(1, false);
+}
 
 function setLanguage(lang) {
   if (!i18n[lang]) return;
@@ -1154,7 +1613,7 @@ function setLanguage(lang) {
     }
   });
 
-  renderDisplay();
+  renderUI();
 
   try {
     localStorage.setItem('cc_finder_lang', lang);
@@ -1178,373 +1637,7 @@ function triggerScan() {
     });
 }
 
-// -------------------------------------------------------------
-// Column Sorting
-// -------------------------------------------------------------
-let currentSortCol = 'score';
-let currentSortDir = 'desc';
-
-function handleSort(col, headerEl) {
-  if (currentSortCol === col) {
-    currentSortDir = (currentSortDir === 'desc') ? 'asc' : 'desc';
-  } else {
-    currentSortCol = col;
-    if (col === 'title' || col === 'source' || col === 'location') {
-      currentSortDir = 'asc';
-    } else {
-      currentSortDir = 'desc';
-    }
-  }
-
-  document.querySelectorAll('th.sortable').forEach(th => {
-    th.classList.remove('active');
-    const icon = th.querySelector('.sort-icon');
-    if (icon) icon.innerText = '↕';
-  });
-
-  headerEl.classList.add('active');
-  const icon = headerEl.querySelector('.sort-icon');
-  if (icon) {
-    icon.innerText = currentSortDir === 'asc' ? '▲' : '▼';
-  }
-
-  sortRows();
-}
-
-function sortRows() {
-  const tbody = document.querySelector('#listingsTable tbody');
-  const rows = Array.from(tbody.querySelectorAll('tr.listing-row'));
-  if (rows.length === 0) return;
-
-  rows.sort((a, b) => {
-    const valA = a.dataset[currentSortCol] || '';
-    const valB = b.dataset[currentSortCol] || '';
-
-    if (['score', 'price', 'signals', 'time', 'status'].includes(currentSortCol)) {
-      const numA = parseFloat(valA) || 0;
-      const numB = parseFloat(valB) || 0;
-      return currentSortDir === 'asc' ? numA - numB : numB - numA;
-    }
-
-    const comp = valA.localeCompare(valB, undefined, { sensitivity: 'base', numeric: true });
-    return currentSortDir === 'asc' ? comp : -comp;
-  });
-
-  const noResultsRow = document.getElementById('noResultsRow');
-  rows.forEach(r => tbody.appendChild(r));
-  if (noResultsRow) {
-    tbody.appendChild(noResultsRow);
-  }
-
-  applyFilters();
-}
-
-// -------------------------------------------------------------
-// Extended Filtering & Rendering
-// -------------------------------------------------------------
-let currentScorePreset = 'all';
-
-function setScorePreset(preset, btn) {
-  currentScorePreset = preset;
-  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  applyFilters();
-}
-
-function setPricePreset(preset, btn) {
-  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-
-  const minInput = document.getElementById('minPrice');
-  const maxInput = document.getElementById('maxPrice');
-
-  if (preset === 'under50') {
-    minInput.value = '';
-    maxInput.value = '50';
-  } else if (preset === '50to150') {
-    minInput.value = '50';
-    maxInput.value = '150';
-  } else if (preset === 'over150') {
-    minInput.value = '150';
-    maxInput.value = '';
-  } else {
-    minInput.value = '';
-    maxInput.value = '';
-  }
-  applyFilters();
-}
-
-function onPriceInput() {
-  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
-  applyFilters();
-}
-
-function applyFilters() {
-  const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
-  const source = (document.getElementById('sourceFilter').value || '').toLowerCase();
-  const status = document.getElementById('statusFilter').value;
-  const photoOnly = document.getElementById('photoFilter').checked;
-
-  const minPriceVal = parseFloat(document.getElementById('minPrice').value);
-  const maxPriceVal = parseFloat(document.getElementById('maxPrice').value);
-
-  const rows = document.querySelectorAll('#listingsTable tbody tr.listing-row');
-  matchedRows = [];
-
-  rows.forEach(r => {
-    const rScore = parseInt(r.dataset.score || '0', 10);
-    const rPrice = parseFloat(r.dataset.price || '0');
-    const rSource = (r.dataset.source || '').toLowerCase();
-    const rStatus = r.dataset.status;
-    const rPhoto = r.dataset.photo;
-    const rText = r.innerText.toLowerCase();
-
-    // 1. Text Search
-    let matchText = true;
-    if (query) {
-      matchText = rText.includes(query);
-    }
-
-    // 2. Score Preset Filter
-    let matchScore = true;
-    if (currentScorePreset === 'candidates') {
-      matchScore = rScore >= minAlertThreshold;
-    } else if (currentScorePreset === 'med') {
-      matchScore = rScore >= 50;
-    } else if (currentScorePreset === 'high') {
-      matchScore = rScore >= 75;
-    } else if (currentScorePreset === 'low') {
-      matchScore = rScore < 50;
-    }
-
-    // 3. Source Filter
-    let matchSource = true;
-    if (source) {
-      matchSource = rSource === source;
-    }
-
-    // 4. Alert Status Filter
-    let matchStatus = true;
-    if (status === 'alerted') {
-      matchStatus = rStatus === '1';
-    } else if (status === 'unalerted') {
-      matchStatus = rStatus === '0';
-    }
-
-    // 5. Photo Filter
-    let matchPhoto = true;
-    if (photoOnly) {
-      matchPhoto = rPhoto === '1';
-    }
-
-    // 6. Price Range
-    let matchPrice = true;
-    if (!isNaN(minPriceVal) && rPrice < minPriceVal) {
-      matchPrice = false;
-    }
-    if (!isNaN(maxPriceVal) && rPrice > maxPriceVal) {
-      matchPrice = false;
-    }
-
-    if (matchText && matchScore && matchSource && matchStatus && matchPhoto && matchPrice) {
-      matchedRows.push(r);
-    }
-  });
-
-  currentPage = 1;
-  infiniteVisibleLimit = pageSize;
-  renderDisplay();
-}
-
-function renderDisplay() {
-  const dict = i18n[currentLang];
-  const totalMatched = matchedRows.length;
-  const allRows = document.querySelectorAll('#listingsTable tbody tr.listing-row');
-  const noResultsRow = document.getElementById('noResultsRow');
-  const paginationContainer = document.getElementById('paginationContainer');
-  const infiniteContainer = document.getElementById('infiniteContainer');
-
-  if (totalMatched === 0) {
-    allRows.forEach(r => r.style.display = 'none');
-    if (noResultsRow) noResultsRow.style.display = (allRows.length > 0) ? '' : 'none';
-    if (paginationContainer) paginationContainer.style.display = 'none';
-    if (infiniteContainer) infiniteContainer.style.display = 'none';
-
-    const counterWrapper = document.getElementById('visibleCounterWrapper');
-    if (counterWrapper) {
-      if (currentLang === 'lv') {
-        counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">0</strong> no ' + totalListingCount + ' sludinājumiem';
-      } else {
-        counterWrapper.innerHTML = 'Showing <strong id="visibleCount">0</strong> of ' + totalListingCount + ' listings';
-      }
-    }
-    const viewModeInfo = document.getElementById('viewModeInfo');
-    if (viewModeInfo) viewModeInfo.innerText = '';
-    return;
-  }
-
-  if (noResultsRow) noResultsRow.style.display = 'none';
-
-  // Hide all rows initially
-  allRows.forEach(r => r.style.display = 'none');
-
-  if (currentViewMode === 'pagination') {
-    if (paginationContainer) paginationContainer.style.display = 'flex';
-    if (infiniteContainer) infiniteContainer.style.display = 'none';
-
-    const totalPages = Math.max(1, Math.ceil(totalMatched / pageSize));
-    if (currentPage > totalPages) currentPage = totalPages;
-    if (currentPage < 1) currentPage = 1;
-
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = Math.min(startIndex + pageSize, totalMatched);
-
-    for (let i = startIndex; i < endIndex; i++) {
-      matchedRows[i].style.display = '';
-    }
-
-    renderPaginationNav(currentPage, totalPages);
-
-    const paginationInfo = document.getElementById('paginationInfo');
-    const counterWrapper = document.getElementById('visibleCounterWrapper');
-    const viewModeInfo = document.getElementById('viewModeInfo');
-
-    const dispRange = (startIndex + 1) + '–' + endIndex;
-    if (currentLang === 'lv') {
-      const infoText = 'Rāda <strong>' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem (Lapa ' + currentPage + ' no ' + totalPages + ')';
-      if (paginationInfo) paginationInfo.innerHTML = infoText;
-      if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + dispRange + '</strong> no ' + totalListingCount + ' sludinājumiem';
-      if (viewModeInfo) viewModeInfo.innerText = currentPage + '. no ' + totalPages + ' lapām';
-    } else {
-      const infoText = 'Showing <strong>' + dispRange + '</strong> of ' + totalMatched + ' listings (Page ' + currentPage + ' of ' + totalPages + ')';
-      if (paginationInfo) paginationInfo.innerHTML = infoText;
-      if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + dispRange + '</strong> of ' + totalListingCount + ' listings';
-      if (viewModeInfo) viewModeInfo.innerText = 'Page ' + currentPage + ' of ' + totalPages;
-    }
-  } else {
-    // Infinite Scroll Mode
-    if (paginationContainer) paginationContainer.style.display = 'none';
-    if (infiniteContainer) infiniteContainer.style.display = 'flex';
-
-    const visibleEnd = Math.min(infiniteVisibleLimit, totalMatched);
-    for (let i = 0; i < visibleEnd; i++) {
-      matchedRows[i].style.display = '';
-    }
-
-    const counterWrapper = document.getElementById('visibleCounterWrapper');
-    const viewModeInfo = document.getElementById('viewModeInfo');
-    const statusText = document.getElementById('infiniteStatusText');
-    const btnLoadMore = document.getElementById('btnLoadMore');
-
-    if (currentLang === 'lv') {
-      if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + visibleEnd + '</strong> no ' + totalListingCount + ' sludinājumiem';
-      if (viewModeInfo) viewModeInfo.innerText = 'Ielādēti ' + visibleEnd + ' no ' + totalMatched;
-    } else {
-      if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + visibleEnd + '</strong> of ' + totalListingCount + ' listings';
-      if (viewModeInfo) viewModeInfo.innerText = 'Loaded ' + visibleEnd + ' of ' + totalMatched;
-    }
-
-    if (visibleEnd >= totalMatched) {
-      if (statusText) statusText.innerText = dict.all_loaded + ' (' + totalMatched + ')';
-      if (btnLoadMore) btnLoadMore.style.display = 'none';
-    } else {
-      if (statusText) statusText.innerText = (currentLang === 'lv' ? 'Parādīti ' : 'Displayed ') + visibleEnd + ' / ' + totalMatched;
-      if (btnLoadMore) btnLoadMore.style.display = 'inline-block';
-    }
-  }
-}
-
-function renderPaginationNav(currentPage, totalPages) {
-  const nav = document.getElementById('paginationNav');
-  if (!nav) return;
-  nav.innerHTML = '';
-
-  const dict = i18n[currentLang];
-
-  // First button
-  const firstBtn = document.createElement('button');
-  firstBtn.className = 'page-btn';
-  firstBtn.innerHTML = dict.page_first;
-  firstBtn.disabled = (currentPage === 1);
-  firstBtn.onclick = () => goToPage(1);
-  nav.appendChild(firstBtn);
-
-  // Prev button
-  const prevBtn = document.createElement('button');
-  prevBtn.className = 'page-btn';
-  prevBtn.innerHTML = dict.page_prev;
-  prevBtn.disabled = (currentPage === 1);
-  prevBtn.onclick = () => goToPage(currentPage - 1);
-  nav.appendChild(prevBtn);
-
-  // Pages windowing
-  let pages = [];
-  if (totalPages <= 7) {
-    for (let p = 1; p <= totalPages; p++) pages.push(p);
-  } else {
-    if (currentPage <= 4) {
-      pages = [1, 2, 3, 4, 5, '...', totalPages];
-    } else if (currentPage >= totalPages - 3) {
-      pages = [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
-    } else {
-      pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
-    }
-  }
-
-  pages.forEach(p => {
-    if (p === '...') {
-      const span = document.createElement('span');
-      span.className = 'page-ellipsis';
-      span.innerText = '…';
-      nav.appendChild(span);
-    } else {
-      const pageBtn = document.createElement('button');
-      pageBtn.className = 'page-btn' + (p === currentPage ? ' active' : '');
-      pageBtn.innerText = p;
-      pageBtn.onclick = () => goToPage(p);
-      nav.appendChild(pageBtn);
-    }
-  });
-
-  // Next button
-  const nextBtn = document.createElement('button');
-  nextBtn.className = 'page-btn';
-  nextBtn.innerHTML = dict.page_next;
-  nextBtn.disabled = (currentPage === totalPages);
-  nextBtn.onclick = () => goToPage(currentPage + 1);
-  nav.appendChild(nextBtn);
-
-  // Last button
-  const lastBtn = document.createElement('button');
-  lastBtn.className = 'page-btn';
-  lastBtn.innerHTML = dict.page_last;
-  lastBtn.disabled = (currentPage === totalPages);
-  lastBtn.onclick = () => goToPage(totalPages);
-  nav.appendChild(lastBtn);
-}
-
-function resetFilters() {
-  document.getElementById('searchInput').value = '';
-  document.getElementById('sourceFilter').value = '';
-  document.getElementById('statusFilter').value = '';
-  document.getElementById('photoFilter').checked = false;
-  document.getElementById('minPrice').value = '';
-  document.getElementById('maxPrice').value = '';
-
-  currentScorePreset = 'all';
-  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
-  const allScoreBtn = document.getElementById('scoreBtnAll');
-  if (allScoreBtn) allScoreBtn.classList.add('active');
-
-  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
-  const allPriceBtn = document.getElementById('priceBtnAll');
-  if (allPriceBtn) allPriceBtn.classList.add('active');
-
-  applyFilters();
-}
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
+function init() {
   try {
     const savedMode = localStorage.getItem('cc_finder_view_mode');
     if (savedMode === 'pagination' || savedMode === 'infinite') {
@@ -1576,9 +1669,15 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch (e) {}
 
   setLanguage(currentLang);
-  sortRows();
+  renderUI();
   setupInfiniteObserver();
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
 </script>
 </body>
 </html>`

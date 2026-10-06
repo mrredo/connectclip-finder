@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -241,4 +242,173 @@ func BuildRules() []Rule {
 			},
 		},
 	}
+}
+
+// BuildCustomRules constructs dynamic matching rules for any user-configured target item.
+func BuildCustomRules(
+	targetName string,
+	exactKeywords []string,
+	contextKeywords []string,
+	modelNumbers []string,
+	excludeKeywords []string,
+	minPrice, maxPrice float64,
+) []Rule {
+	var rules []Rule
+
+	// 1. Exact phrase matches (+85)
+	if len(exactKeywords) > 0 {
+		var normExact []string
+		for _, kw := range exactKeywords {
+			norm := NormalizeText(kw)
+			if norm != "" {
+				normExact = append(normExact, norm)
+			}
+		}
+		if len(normExact) > 0 {
+			rules = append(rules, Rule{
+				Name:   "Exact target item phrase",
+				Weight: 85,
+				Check: func(title, desc string, price float64) (bool, string) {
+					t := title + " " + desc
+					for _, phrase := range normExact {
+						if strings.Contains(t, phrase) {
+							return true, fmt.Sprintf("Matched exact target phrase '%s' in text (+85)", phrase)
+						}
+					}
+					return false, ""
+				},
+			})
+		}
+	}
+
+	// 2. Model / part numbers (+75)
+	if len(modelNumbers) > 0 {
+		var normModels []string
+		for _, mn := range modelNumbers {
+			norm := NormalizeText(mn)
+			if norm != "" {
+				normModels = append(normModels, norm)
+			}
+		}
+		if len(normModels) > 0 {
+			rules = append(rules, Rule{
+				Name:   "Model / article / part number",
+				Weight: 75,
+				Check: func(title, desc string, price float64) (bool, string) {
+					t := title + " " + desc
+					for _, m := range normModels {
+						if strings.Contains(t, m) {
+							return true, fmt.Sprintf("Matched model/part number '%s' (+75)", m)
+						}
+					}
+					return false, ""
+				},
+			})
+		}
+	}
+
+	// 3. Context keywords (+20 each)
+	if len(contextKeywords) > 0 {
+		var normContext []string
+		for _, kw := range contextKeywords {
+			norm := NormalizeText(kw)
+			if norm != "" {
+				normContext = append(normContext, norm)
+			}
+		}
+		for _, kw := range normContext {
+			keyword := kw
+			rules = append(rules, Rule{
+				Name:   fmt.Sprintf("Context signal '%s'", keyword),
+				Weight: 20,
+				Check: func(title, desc string, price float64) (bool, string) {
+					t := title + " " + desc
+					if strings.Contains(t, keyword) {
+						return true, fmt.Sprintf("Matched context signal '%s' (+20)", keyword)
+					}
+					return false, ""
+				},
+			})
+		}
+	}
+
+	// 4. Plausible target price range (+15)
+	if minPrice > 0 || maxPrice > 0 {
+		rules = append(rules, Rule{
+			Name:   "Plausible target price range",
+			Weight: 15,
+			Check: func(title, desc string, price float64) (bool, string) {
+				if price <= 0 {
+					return false, ""
+				}
+				if (minPrice <= 0 || price >= minPrice) && (maxPrice <= 0 || price <= maxPrice) {
+					return true, fmt.Sprintf("Price €%.0f is within target range [€%.0f–€%.0f] (+15)", price, minPrice, maxPrice)
+				}
+				return false, ""
+			},
+		})
+	}
+
+	// 5. Excluded negative keywords (-50 each)
+	if len(excludeKeywords) > 0 {
+		var normExclude []string
+		for _, kw := range excludeKeywords {
+			norm := NormalizeText(kw)
+			if norm != "" {
+				normExclude = append(normExclude, norm)
+			}
+		}
+		for _, kw := range normExclude {
+			badWord := kw
+			rules = append(rules, Rule{
+				Name:   fmt.Sprintf("Excluded keyword '%s'", badWord),
+				Weight: -50,
+				Check: func(title, desc string, price float64) (bool, string) {
+					t := title + " " + desc
+					if strings.Contains(t, badWord) {
+						return true, fmt.Sprintf("Excluded keyword '%s' (-50)", badWord)
+					}
+					return false, ""
+				},
+			})
+		}
+	}
+
+	// 6. Generic penalty if no target terms matched at all
+	rules = append(rules, Rule{
+		Name:   "Penalty: No target keywords matched",
+		Weight: -60,
+		Check: func(title, desc string, price float64) (bool, string) {
+			t := title + " " + desc
+			var anyFound bool
+			for _, kw := range exactKeywords {
+				if strings.Contains(t, NormalizeText(kw)) {
+					anyFound = true
+					break
+				}
+			}
+			if !anyFound {
+				for _, kw := range contextKeywords {
+					if strings.Contains(t, NormalizeText(kw)) {
+						anyFound = true
+						break
+					}
+				}
+			}
+			if !anyFound {
+				for _, mn := range modelNumbers {
+					if strings.Contains(t, NormalizeText(mn)) {
+						anyFound = true
+						break
+					}
+				}
+			}
+			if !anyFound {
+				return true, "No relevant target keywords found (-60)"
+			}
+			return false, ""
+		},
+	})
+
+	return rules
 }

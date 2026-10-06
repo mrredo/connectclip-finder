@@ -136,3 +136,53 @@ func TestTextNormalization(t *testing.T) {
 		t.Errorf("got %q, want %q", actual, expected)
 	}
 }
+
+func TestCustomMatcher(t *testing.T) {
+	// Configure for Nintendo Switch OLED
+	m := matcher.NewCustomMatcher(
+		"Nintendo Switch OLED",
+		[]string{"Switch OLED", "Nintendo Switch OLED"},
+		[]string{"konsole", "console", "joy con"},
+		[]string{"HEG-001"},
+		[]string{"lite", "spēle", "game only", "vāciņš", "case only"},
+		180,
+		320,
+	)
+
+	// Positive exact match
+	l1 := &model.Listing{
+		Title:       "Nintendo Switch OLED balta konsole",
+		Description: "Modelis HEG-001, pilns komplekts, ideālā stāvoklī",
+		Price:       240,
+	}
+	m.Evaluate(l1)
+	if l1.Score < 80 {
+		t.Errorf("Expected high score >= 80 for Switch OLED match, got %d. Reasons: %v", l1.Score, l1.MatchReasons)
+	}
+	if l1.Confidence != model.ConfidenceHigh {
+		t.Errorf("Expected ConfidenceHigh, got %s", l1.Confidence)
+	}
+
+	// Negative match with excluded keyword
+	l2 := &model.Listing{
+		Title:       "Nintendo Switch Lite dzeltena",
+		Description: "Lietota konsole",
+		Price:       120,
+	}
+	m.Evaluate(l2)
+	if l2.Score > 40 {
+		t.Errorf("Expected low score <= 40 for Switch Lite with penalty, got %d. Reasons: %v", l2.Score, l2.MatchReasons)
+	}
+
+	// Completely unrelated listing
+	l3 := &model.Listing{
+		Title:       "Apple iPhone 13 128GB",
+		Description: "Melns telefons labā stāvoklī",
+		Price:       350,
+	}
+	m.Evaluate(l3)
+	if l3.Score != 0 {
+		t.Errorf("Expected score 0 for unrelated phone, got %d. Reasons: %v", l3.Score, l3.MatchReasons)
+	}
+}
+

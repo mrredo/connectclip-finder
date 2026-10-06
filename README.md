@@ -72,6 +72,20 @@ MIN_ALERT_SCORE=70
 # Database location
 DB_PATH=data/connectclip.db
 
+# -------------------------------------------------------------
+# Target Product Configuration (Customizable for ANY item)
+# -------------------------------------------------------------
+TARGET_NAME=Oticon ConnectClip
+SEARCH_TERMS=Oticon ConnectClip, ConnectClip, Connect Clip, Oticon dzirdes, Oticon mikrofons, Oticon Bluetooth, Oticon streamer, 178509
+TARGET_MIN_PRICE=30
+TARGET_MAX_PRICE=200
+
+# Optional custom keyword signals:
+# MATCH_EXACT_KEYWORDS=Oticon ConnectClip, Connect Clip
+# MATCH_CONTEXT_KEYWORDS=mikrofons, dzirdes aparats, streamer
+# MATCH_MODEL_NUMBERS=178509, AC1A, 2ACAHAC01
+# MATCH_EXCLUDE_KEYWORDS=ladetajs, charger, tv adapter, edumic, phonak, widex
+
 # Telegram Bot Alerts
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
 TELEGRAM_CHAT_ID=-1001234567890
@@ -86,6 +100,20 @@ LLM_MODEL=gemini-2.0-flash
 VINTED_SESSION_COOKIE=
 BANKNOTE_COOKIES=
 FB_COOKIES=
+```
+
+### 🎯 Monitoring Other Products
+To monitor another item instead of Oticon ConnectClip (e.g. Nintendo Switch OLED, AirPods, Makita drill, camera, etc.), simply update your `.env`:
+
+```env
+TARGET_NAME=Nintendo Switch OLED
+SEARCH_TERMS=Nintendo Switch OLED, Switch OLED, Switch konsole
+TARGET_MIN_PRICE=180
+TARGET_MAX_PRICE=320
+MATCH_EXACT_KEYWORDS=Nintendo Switch OLED, Switch OLED
+MATCH_CONTEXT_KEYWORDS=konsole, joy con, dock
+MATCH_MODEL_NUMBERS=HEG-001
+MATCH_EXCLUDE_KEYWORDS=Switch Lite, spēle, game only, case only, vāciņš
 ```
 
 ---

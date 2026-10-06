@@ -158,4 +158,35 @@ func TestDashboardServer(t *testing.T) {
 			t.Fatalf("Expected HTTP 404, got %d", rec.Code)
 		}
 	})
+
+	// Test 4: GET /api/listings?paged=true
+	t.Run("GET /api/listings?paged=true Paginated JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/listings?paged=true&page=1&limit=10", nil)
+		rec := httptest.NewRecorder()
+
+		server.httpServer.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200, got %d", rec.Code)
+		}
+
+		var res storage.ListingQueryResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatalf("Failed to unmarshal paged JSON response: %v", err)
+		}
+
+		if res.TotalCount != 1 {
+			t.Errorf("Expected TotalCount=1, got %d", res.TotalCount)
+		}
+		if res.Page != 1 {
+			t.Errorf("Expected Page=1, got %d", res.Page)
+		}
+		if res.PageSize != 10 {
+			t.Errorf("Expected PageSize=10, got %d", res.PageSize)
+		}
+		if len(res.Listings) != 1 {
+			t.Errorf("Expected 1 item, got %d", len(res.Listings))
+		}
+	})
 }
+

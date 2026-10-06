@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectclip-finder/internal/model"
@@ -302,4 +303,211 @@ func (r *Repository) GetStats(ctx context.Context, minAlertScore int) (total int
 	}
 	return total, candidates, notified, nil
 }
+
+// ListingFilter specifies filter and pagination parameters.
+type ListingFilter struct {
+	Query     string
+	Source    string
+	Status    string // "alerted" or "unalerted"
+	PhotoOnly bool
+	MinScore  int
+	MaxScore  int
+	MinPrice  float64
+	MaxPrice  float64
+	SortCol   string // "score", "title", "source", "price", "location", "time", "status"
+	SortDir   string // "asc" or "desc"
+	Page      int
+	PageSize  int
+}
+
+// ListingQueryResult contains paginated listing results.
+type ListingQueryResult struct {
+	Listings   []*model.Listing `json:"items"`
+	TotalCount int              `json:"total"`
+	Page       int              `json:"page"`
+	PageSize   int              `json:"page_size"`
+	TotalPages int              `json:"total_pages"`
+}
+
+// GetListingsPaged queries listings according to filter, sorting, and pagination parameters.
+func (r *Repository) GetListingsPaged(ctx context.Context, f ListingFilter) (*ListingQueryResult, error) {
+	var whereClauses []string
+	var args []any
+
+	if f.MinScore > 0 {
+		whereClauses = append(whereClauses, "score >= ?")
+		args = append(args, f.MinScore)
+	}
+	if f.MaxScore > 0 {
+		whereClauses = append(whereClauses, "score <= ?")
+		args = append(args, f.MaxScore)
+	}
+	if f.Source != "" {
+		whereClauses = append(whereClauses, "source = ?")
+		args = append(args, f.Source)
+	}
+	if f.Status == "alerted" {
+		whereClauses = append(whereClauses, "notified = 1")
+	} else if f.Status == "unalerted" {
+		whereClauses = append(whereClauses, "notified = 0")
+	}
+	if f.PhotoOnly {
+		whereClauses = append(whereClauses, "image_urls != '[]' AND image_urls != '' AND image_urls != 'null'")
+	}
+	if f.MinPrice > 0 {
+		whereClauses = append(whereClauses, "price >= ?")
+		args = append(args, f.MinPrice)
+	}
+	if f.MaxPrice > 0 {
+		whereClauses = append(whereClauses, "price <= ?")
+		args = append(args, f.MaxPrice)
+	}
+	if f.Query != "" {
+		pattern := "%" + f.Query + "%"
+		whereClauses = append(whereClauses, "(title LIKE ? OR description LIKE ? OR location LIKE ? OR match_reasons LIKE ?)")
+		args = append(args, pattern, pattern, pattern, pattern)
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// 1. Total count query
+	countSQL := "SELECT COUNT(*) FROM listings " + whereSQL
+	var totalCount int
+	err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&totalCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count listings: %w", err)
+	}
+
+	// 2. Sorting
+	sortColSQL := "score"
+	switch strings.ToLower(f.SortCol) {
+	case "title":
+		sortColSQL = "title"
+	case "source":
+		sortColSQL = "source"
+	case "price":
+		sortColSQL = "price"
+	case "location":
+		sortColSQL = "location"
+	case "time":
+		sortColSQL = "last_seen_at"
+	case "status":
+		sortColSQL = "notified"
+	case "score":
+		sortColSQL = "score"
+	}
+
+	sortDirSQL := "DESC"
+	if strings.ToLower(f.SortDir) == "asc" {
+		sortDirSQL = "ASC"
+	}
+
+	orderSQL := fmt.Sprintf("ORDER BY %s %s, last_seen_at DESC", sortColSQL, sortDirSQL)
+
+	// 3. Pagination limits
+	pageSize := f.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	page := f.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * pageSize
+
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + pageSize - 1) / pageSize
+	}
+
+	querySQL := fmt.Sprintf(`
+	SELECT id, source, source_id, url, title, description, price, currency,
+	       image_urls, location, seller, score, confidence, match_reasons,
+	       first_seen_at, last_seen_at, notified, notified_at
+	FROM listings
+	%s
+	%s
+	LIMIT ? OFFSET ?`, whereSQL, orderSQL)
+
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, pageSize, offset)
+
+	rows, err := r.db.QueryContext(ctx, querySQL, queryArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query paged listings: %w", err)
+	}
+	defer rows.Close()
+
+	var listings []*model.Listing
+	for rows.Next() {
+		var l model.Listing
+		var sourceStr, confStr, imagesStr, reasonsStr string
+		var notifiedAt sql.NullTime
+
+		err := rows.Scan(
+			&l.ID,
+			&sourceStr,
+			&l.SourceID,
+			&l.URL,
+			&l.Title,
+			&l.Description,
+			&l.Price,
+			&l.Currency,
+			&imagesStr,
+			&l.Location,
+			&l.Seller,
+			&l.Score,
+			&confStr,
+			&reasonsStr,
+			&l.FirstSeenAt,
+			&l.LastSeenAt,
+			&l.Notified,
+			&notifiedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan listing: %w", err)
+		}
+
+		l.Source = model.Source(sourceStr)
+		l.Confidence = model.ConfidenceLevel(confStr)
+		if notifiedAt.Valid {
+			t := notifiedAt.Time
+			l.NotifiedAt = &t
+		}
+		_ = json.Unmarshal([]byte(imagesStr), &l.ImageURLs)
+		_ = json.Unmarshal([]byte(reasonsStr), &l.MatchReasons)
+
+		listings = append(listings, &l)
+	}
+
+	return &ListingQueryResult{
+		Listings:   listings,
+		TotalCount: totalCount,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	}, rows.Err()
+}
+
+// GetAllSources returns a list of distinct sources in alphabetical order.
+func (r *Repository) GetAllSources(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT source FROM listings WHERE source != '' ORDER BY source ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sources []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err == nil {
+			sources = append(sources, s)
+		}
+	}
+	return sources, nil
+}
+
 

@@ -1,9 +1,29 @@
-﻿*.exe
+# Binaries and build artifacts
+*.exe
 *.exe~
-data/*.db
-data/*.db-shm
-data/*.db-wal
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# SQLite databases & runtime data
+data/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+
+# Environment and secrets
 .env
+.env.*
+!.env.example
+
+# Temporary files and logs
+*.log
+*.tmp
+*.bak
+scratch/
+.DS_Store
+Thumbs.db

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"time"
@@ -14,19 +15,28 @@ import (
 
 // TelegramNotifier sends formatted alerts via the Telegram Bot API.
 type TelegramNotifier struct {
-	botToken string
-	chatID   string
-	client   *http.Client
+	botToken   string
+	chatID     string
+	targetName string
+	client     *http.Client
 }
 
 // NewTelegramNotifier creates a new notifier instance.
 func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 	return &TelegramNotifier{
-		botToken: botToken,
-		chatID:   chatID,
+		botToken:   botToken,
+		chatID:     chatID,
+		targetName: "Oticon ConnectClip",
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+	}
+}
+
+// SetTargetName updates the target product name for alerts.
+func (t *TelegramNotifier) SetTargetName(name string) {
+	if name != "" {
+		t.targetName = name
 	}
 }
 
@@ -41,7 +51,7 @@ func (t *TelegramNotifier) TestConnection(ctx context.Context) error {
 		return fmt.Errorf("telegram bot token or chat ID is not configured")
 	}
 
-	testMsg := "🔔 <b>ConnectClip Finder initialized</b>\nTelegram notifications are active and connected."
+	testMsg := fmt.Sprintf("🔔 <b>%s Monitor initialized</b>\nTelegram notifications are active and connected.", html.EscapeString(t.targetName))
 	return t.sendMessage(ctx, testMsg)
 }
 
@@ -51,7 +61,7 @@ func (t *TelegramNotifier) SendListingAlert(ctx context.Context, listing *model.
 		return nil
 	}
 
-	text := FormatTelegramMessage(listing)
+	text := FormatTelegramMessageWithTarget(listing, t.targetName)
 
 	// If listing has an image, attempt sendPhoto
 	if photoURL := listing.PrimaryImage(); photoURL != "" {

@@ -32,25 +32,33 @@ func main() {
 	evalText := flag.String("eval", "", "Evaluate matching score for a title string and exit")
 	flag.Parse()
 
-	// 1. Quick matcher evaluation mode
+	// 1. Load configuration
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 2. Quick matcher evaluation mode
 	if *evalText != "" {
-		m := matcher.NewMatcher()
+		m := matcher.NewCustomMatcher(
+			cfg.TargetName,
+			cfg.MatchExactKeywords,
+			cfg.MatchContextKeywords,
+			cfg.MatchModelNumbers,
+			cfg.MatchExcludeKeywords,
+			cfg.TargetMinPrice,
+			cfg.TargetMaxPrice,
+		)
 		testListing := &model.Listing{
 			Title:       *evalText,
 			Description: *evalText,
 			Price:       85.0,
 		}
 		m.Evaluate(testListing)
-		fmt.Printf("Listing: %s\nScore: %d%%\nConfidence: %s\nSignals: %s\n",
-			testListing.Title, testListing.Score, testListing.Confidence, strings.Join(testListing.MatchReasons, "; "))
+		fmt.Printf("Target: %s\nListing: %s\nScore: %d%%\nConfidence: %s\nSignals: %s\n",
+			cfg.TargetName, testListing.Title, testListing.Score, testListing.Confidence, strings.Join(testListing.MatchReasons, "; "))
 		os.Exit(0)
-	}
-
-	// 2. Load configuration
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
-		os.Exit(1)
 	}
 
 	// 3. Configure structured logger
@@ -68,7 +76,8 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
-	slog.Info("Starting ConnectClip Finder",
+	slog.Info("Starting Marketplace Finder",
+		"target", cfg.TargetName,
 		"db_path", cfg.DBPath,
 		"scan_interval", cfg.ScanInterval,
 		"alert_threshold", cfg.MinAlertScore,
@@ -76,6 +85,7 @@ func main() {
 
 	// 4. Initialize Telegram Notifier
 	telegram := notifier.NewTelegramNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
+	telegram.SetTargetName(cfg.TargetName)
 	if *testTelegram {
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ScanInterval)
 		defer cancel()
@@ -98,7 +108,15 @@ func main() {
 	repo := storage.NewRepository(db)
 
 	// 6. Initialize Matcher & Optional AI Classifier
-	matchEngine := matcher.NewMatcher()
+	matchEngine := matcher.NewCustomMatcher(
+		cfg.TargetName,
+		cfg.MatchExactKeywords,
+		cfg.MatchContextKeywords,
+		cfg.MatchModelNumbers,
+		cfg.MatchExcludeKeywords,
+		cfg.TargetMinPrice,
+		cfg.TargetMaxPrice,
+	)
 	aiClassifier := matcher.NewAIClassifier(cfg.LLMEnabled, cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMModel)
 	if aiClassifier.IsEnabled() {
 		slog.Info("AI classifier enabled", "provider", cfg.LLMProvider, "model", cfg.LLMModel)
@@ -153,7 +171,7 @@ func main() {
 		if *httpAddrFlag != "" {
 			addr = *httpAddrFlag
 		}
-		webServer = web.NewServer(addr, repo, sched, cfg.MinAlertScore)
+		webServer = web.NewServer(addr, repo, sched, cfg.MinAlertScore, cfg.TargetName)
 		go func() {
 			if err := webServer.Start(); err != nil {
 				slog.Error("Web dashboard server stopped", "error", err)
