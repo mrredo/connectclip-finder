@@ -48,8 +48,8 @@ func TestDashboardServer(t *testing.T) {
 
 	server := NewServer(":0", repo, nil, 70)
 
-	// Test 1: GET / (Dashboard HTML)
-	t.Run("GET / HTML Dashboard", func(t *testing.T) {
+	// Test 1: GET / (Dashboard HTML with sorting & filters)
+	t.Run("GET / HTML Dashboard with Sorting and Filters", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
@@ -68,6 +68,46 @@ func TestDashboardServer(t *testing.T) {
 		}
 		if !strings.Contains(body, "€85.00") {
 			t.Errorf("HTML dashboard missing price formatting")
+		}
+
+		// Verify sortable headers
+		sortCols := []string{"score", "title", "source", "price", "location", "signals", "time", "status"}
+		for _, col := range sortCols {
+			expectedAttr := `data-col="` + col + `"`
+			if !strings.Contains(body, expectedAttr) {
+				t.Errorf("HTML dashboard missing sortable column: %s", col)
+			}
+		}
+
+		// Verify extended filter controls
+		filterElements := []string{
+			`id="searchInput"`,
+			`id="sourceFilter"`,
+			`id="statusFilter"`,
+			`id="minPrice"`,
+			`id="maxPrice"`,
+			`id="photoFilter"`,
+			`id="scoreBtnCandidates"`,
+			`id="priceBtnTarget"`,
+			`id="visibleCount"`,
+		}
+		for _, el := range filterElements {
+			if !strings.Contains(body, el) {
+				t.Errorf("HTML dashboard missing filter element: %s", el)
+			}
+		}
+
+		// Verify row data attributes used for client-side sorting & filtering
+		rowAttrs := []string{
+			`data-score="95"`,
+			`data-price="85"`,
+			`data-signals="2"`,
+			`data-source="SS.com"`,
+		}
+		for _, attr := range rowAttrs {
+			if !strings.Contains(body, attr) {
+				t.Errorf("HTML row missing data attribute: %s", attr)
+			}
 		}
 	})
 

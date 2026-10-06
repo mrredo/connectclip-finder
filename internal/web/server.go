@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -68,6 +69,7 @@ type dashboardData struct {
 	Notified      int
 	MinAlertScore int
 	Listings      []*model.Listing
+	Sources       []string
 	LastUpdated   string
 }
 
@@ -95,12 +97,25 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sourceMap := make(map[string]bool)
+	for _, l := range listings {
+		if l.Source != "" {
+			sourceMap[string(l.Source)] = true
+		}
+	}
+	var sources []string
+	for src := range sourceMap {
+		sources = append(sources, src)
+	}
+	sort.Strings(sources)
+
 	data := dashboardData{
 		TotalListings: total,
 		Candidates:    candidates,
 		Notified:      notified,
 		MinAlertScore: s.minAlertScore,
 		Listings:      listings,
+		Sources:       sources,
 		LastUpdated:   time.Now().Format("15:04:05 02.01.2006"),
 	}
 
@@ -176,7 +191,7 @@ const dashboardHTML = `<!DOCTYPE html>
     color: var(--text);
     padding: 24px 20px;
   }
-  .container { max-width: 1400px; margin: 0 auto; }
+  .container { max-width: 1440px; margin: 0 auto; }
   header {
     display: flex;
     justify-content: space-between;
@@ -209,8 +224,10 @@ const dashboardHTML = `<!DOCTYPE html>
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    font-size: 0.9rem;
   }
   .btn:hover { background: var(--primary-hover); }
+  .btn-sm { padding: 5px 12px; font-size: 0.82rem; }
   .btn-secondary { background: var(--card-border); color: #fff; }
   .btn-secondary:hover { background: #475569; }
 
@@ -231,40 +248,112 @@ const dashboardHTML = `<!DOCTYPE html>
   .stat-val { font-size: 1.8rem; font-weight: 700; color: #fff; }
   .stat-val.high { color: var(--high); }
 
-  /* Controls & Search */
+  /* Controls & Filters */
   .table-controls {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    padding: 18px 20px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .controls-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 16px;
-    background: var(--card);
-    border: 1px solid var(--card-border);
-    padding: 14px 18px;
-    border-radius: 8px;
-    margin-bottom: 16px;
+    gap: 12px;
+  }
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 260px;
+    max-width: 380px;
   }
   .search-input {
     background: #0f172a;
     border: 1px solid var(--card-border);
     color: #fff;
-    padding: 8px 14px;
+    padding: 8px 14px 8px 34px;
     border-radius: 6px;
-    width: 280px;
+    width: 100%;
     font-size: 0.9rem;
   }
-  .search-input:focus { outline: 1px solid var(--primary); }
-  .filter-group { display: flex; gap: 8px; align-items: center; font-size: 0.9rem; color: var(--text-muted); }
+  .search-icon {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    pointer-events: none;
+  }
+  .filter-select {
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .filter-select:focus, .search-input:focus, .num-input:focus {
+    outline: 1px solid var(--primary);
+  }
+  .price-inputs {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  .num-input {
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    color: #fff;
+    padding: 7px 10px;
+    border-radius: 6px;
+    width: 78px;
+    font-size: 0.85rem;
+  }
+  .checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    cursor: pointer;
+    user-select: none;
+  }
+  .checkbox-label input { cursor: pointer; }
+  .filter-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
   .filter-btn {
     background: transparent;
     border: 1px solid var(--card-border);
     color: var(--text-muted);
-    padding: 6px 12px;
+    padding: 5px 11px;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
+    transition: all 0.15s ease;
   }
-  .filter-btn.active, .filter-btn:hover { background: var(--card-border); color: #fff; }
+  .filter-btn:hover { background: var(--card-border); color: #fff; }
+  .filter-btn.active { background: #0284c7; color: #fff; border-color: #38bdf8; font-weight: 600; }
+  .result-counter {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+  .result-counter strong { color: #fff; }
 
   /* Table */
   .table-container {
@@ -286,6 +375,31 @@ const dashboardHTML = `<!DOCTYPE html>
     padding: 12px 16px;
     border-bottom: 1px solid var(--card-border);
     white-space: nowrap;
+  }
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+  }
+  th.sortable:hover {
+    background: #1e293b;
+    color: #fff;
+  }
+  th.sortable.active {
+    color: var(--primary);
+    background: #152438;
+  }
+  th.sortable .sort-icon {
+    display: inline-block;
+    margin-left: 5px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    width: 12px;
+    text-align: center;
+  }
+  th.sortable.active .sort-icon {
+    color: var(--primary);
+    font-weight: bold;
   }
   td {
     padding: 14px 16px;
@@ -393,12 +507,73 @@ const dashboardHTML = `<!DOCTYPE html>
   </div>
 
   <div class="table-controls">
-    <input type="text" id="searchInput" class="search-input" placeholder="Search titles, sources, locations..." onkeyup="filterTable()">
-    <div class="filter-group">
-      <span>Filter:</span>
-      <button class="filter-btn active" onclick="setScoreFilter(0, this)">All ({{len .Listings}})</button>
-      <button class="filter-btn" onclick="setScoreFilter(50, this)">Medium+ (&ge;50%)</button>
-      <button class="filter-btn" onclick="setScoreFilter({{.MinAlertScore}}, this)">Candidates Only (&ge;{{.MinAlertScore}}%)</button>
+    <!-- Filter Controls Row 1 -->
+    <div class="controls-row">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search title, description, location, signals..." onkeyup="applyFilters()">
+      </div>
+
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <!-- Marketplace Source Filter -->
+        <select id="sourceFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All Marketplaces</option>
+          {{range .Sources}}
+            <option value="{{.}}">{{.}}</option>
+          {{end}}
+        </select>
+
+        <!-- Status Filter -->
+        <select id="statusFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All Alert Statuses</option>
+          <option value="alerted">🚨 Alerted Only</option>
+          <option value="unalerted">Not Yet Alerted</option>
+        </select>
+
+        <!-- Price Range -->
+        <div class="price-inputs">
+          <span>Price:</span>
+          <input type="number" id="minPrice" class="num-input" placeholder="Min €" min="0" oninput="onPriceInput()">
+          <span>–</span>
+          <input type="number" id="maxPrice" class="num-input" placeholder="Max €" min="0" oninput="onPriceInput()">
+        </div>
+
+        <!-- Photos Only Checkbox -->
+        <label class="checkbox-label">
+          <input type="checkbox" id="photoFilter" onchange="applyFilters()">
+          <span>📷 With photo</span>
+        </label>
+
+        <!-- Reset Button -->
+        <button class="btn btn-secondary btn-sm" onclick="resetFilters()">✕ Clear</button>
+      </div>
+    </div>
+
+    <!-- Filter Controls Row 2: Presets & Counter -->
+    <div class="controls-row">
+      <!-- Score Presets -->
+      <div class="filter-group">
+        <span>Score:</span>
+        <button id="scoreBtnAll" class="filter-btn score-btn active" onclick="setScorePreset('all', this)">All</button>
+        <button id="scoreBtnCandidates" class="filter-btn score-btn" onclick="setScorePreset('candidates', this)">Candidates (&ge;{{.MinAlertScore}}%)</button>
+        <button id="scoreBtnMed" class="filter-btn score-btn" onclick="setScorePreset('med', this)">Medium+ (&ge;50%)</button>
+        <button id="scoreBtnHigh" class="filter-btn score-btn" onclick="setScorePreset('high', this)">High (&ge;75%)</button>
+        <button id="scoreBtnLow" class="filter-btn score-btn" onclick="setScorePreset('low', this)">Low (&lt;50%)</button>
+      </div>
+
+      <!-- Price Presets -->
+      <div class="filter-group">
+        <span>Price Range:</span>
+        <button id="priceBtnAll" class="filter-btn price-btn active" onclick="setPricePreset('all', this)">All</button>
+        <button id="priceBtnUnder50" class="filter-btn price-btn" onclick="setPricePreset('under50', this)">&lt; €50</button>
+        <button id="priceBtnTarget" class="filter-btn price-btn" onclick="setPricePreset('50to150', this)">€50 – €150 (Target)</button>
+        <button id="priceBtnOver150" class="filter-btn price-btn" onclick="setPricePreset('over150', this)">&gt; €150</button>
+      </div>
+
+      <!-- Live Counter -->
+      <div class="result-counter">
+        Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{len .Listings}} listings
+      </div>
     </div>
   </div>
 
@@ -406,20 +581,45 @@ const dashboardHTML = `<!DOCTYPE html>
     <table id="listingsTable">
       <thead>
         <tr>
-          <th style="width: 60px;">Photo</th>
-          <th>Score</th>
-          <th>Title & Details</th>
-          <th>Source</th>
-          <th>Price</th>
-          <th>Location</th>
-          <th>Signals</th>
-          <th>Last Seen</th>
-          <th>Status</th>
+          <th style="width: 58px;">Photo</th>
+          <th class="sortable active" data-col="score" onclick="handleSort('score', this)" title="Click to sort by match score">
+            Score <span class="sort-icon">▼</span>
+          </th>
+          <th class="sortable" data-col="title" onclick="handleSort('title', this)" title="Click to sort alphabetically by title">
+            Title & Details <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="source" onclick="handleSort('source', this)" title="Click to sort by marketplace source">
+            Source <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="price" onclick="handleSort('price', this)" title="Click to sort by price">
+            Price <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="location" onclick="handleSort('location', this)" title="Click to sort by location">
+            Location <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="signals" onclick="handleSort('signals', this)" title="Click to sort by signal count">
+            Signals <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="time" onclick="handleSort('time', this)" title="Click to sort chronologically">
+            Last Seen <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="status" onclick="handleSort('status', this)" title="Click to sort by notification status">
+            Status <span class="sort-icon">↕</span>
+          </th>
         </tr>
       </thead>
       <tbody>
         {{range .Listings}}
-        <tr data-score="{{.Score}}">
+        <tr class="listing-row"
+            data-score="{{.Score}}"
+            data-title="{{.Title}}"
+            data-source="{{.Source}}"
+            data-price="{{.Price}}"
+            data-location="{{if .Location}}{{.Location}}{{else}}Latvija{{end}}"
+            data-signals="{{len .MatchReasons}}"
+            data-time="{{.LastSeenAt.Unix}}"
+            data-status="{{if .Notified}}1{{else}}0{{end}}"
+            data-photo="{{if .PrimaryImage}}1{{else}}0{{end}}">
           <td>
             {{if .PrimaryImage}}
               <img src="{{.PrimaryImage}}" alt="" class="thumb" onerror="this.style.display='none'">
@@ -469,10 +669,19 @@ const dashboardHTML = `<!DOCTYPE html>
             {{end}}
           </td>
         </tr>
-        {{else}}
+        {{end}}
+
+        <tr id="noResultsRow" style="display: none;">
+          <td colspan="9" style="text-align: center; padding: 48px 20px; color: var(--text-muted);">
+            <div style="font-size: 1.05rem; margin-bottom: 10px;">🔍 No listings match the current filters</div>
+            <button class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset All Filters</button>
+          </td>
+        </tr>
+
+        {{if eq (len .Listings) 0}}
         <tr>
-          <td colspan="9" style="text-align: center; padding: 40px; color: var(--text-muted);">
-            No listings tracked yet. Click "Trigger Scan Now" to begin scanning.
+          <td colspan="9" style="text-align: center; padding: 48px 20px; color: var(--text-muted);">
+            No listings tracked yet. Click "Trigger Scan Now" to run an initial marketplace scan.
           </td>
         </tr>
         {{end}}
@@ -499,25 +708,216 @@ function triggerScan() {
     });
 }
 
-function filterTable() {
-  const query = document.getElementById('searchInput').value.toLowerCase();
-  const rows = document.querySelectorAll('#listingsTable tbody tr');
-  rows.forEach(r => {
-    const text = r.innerText.toLowerCase();
-    const score = parseInt(r.getAttribute('data-score') || '0', 10);
-    const scorePass = score >= currentMinScore;
-    const textPass = text.includes(query);
-    r.style.display = (scorePass && textPass) ? '' : 'none';
+// -------------------------------------------------------------
+// Column Sorting
+// -------------------------------------------------------------
+let currentSortCol = 'score';
+let currentSortDir = 'desc';
+
+function handleSort(col, headerEl) {
+  if (currentSortCol === col) {
+    currentSortDir = (currentSortDir === 'desc') ? 'asc' : 'desc';
+  } else {
+    currentSortCol = col;
+    // Default descending for numeric/time/status, ascending for text
+    if (col === 'title' || col === 'source' || col === 'location') {
+      currentSortDir = 'asc';
+    } else {
+      currentSortDir = 'desc';
+    }
+  }
+
+  // Update header classes & indicators
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('active');
+    const icon = th.querySelector('.sort-icon');
+    if (icon) icon.innerText = '↕';
   });
+
+  headerEl.classList.add('active');
+  const icon = headerEl.querySelector('.sort-icon');
+  if (icon) {
+    icon.innerText = currentSortDir === 'asc' ? '▲' : '▼';
+  }
+
+  sortRows();
 }
 
-let currentMinScore = 0;
-function setScoreFilter(min, btn) {
-  currentMinScore = min;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  filterTable();
+function sortRows() {
+  const tbody = document.querySelector('#listingsTable tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr.listing-row'));
+  if (rows.length === 0) return;
+
+  rows.sort((a, b) => {
+    const valA = a.dataset[currentSortCol] || '';
+    const valB = b.dataset[currentSortCol] || '';
+
+    // Numeric sorting
+    if (['score', 'price', 'signals', 'time', 'status'].includes(currentSortCol)) {
+      const numA = parseFloat(valA) || 0;
+      const numB = parseFloat(valB) || 0;
+      return currentSortDir === 'asc' ? numA - numB : numB - numA;
+    }
+
+    // String sorting
+    const comp = valA.localeCompare(valB, undefined, { sensitivity: 'base', numeric: true });
+    return currentSortDir === 'asc' ? comp : -comp;
+  });
+
+  const noResultsRow = document.getElementById('noResultsRow');
+  rows.forEach(r => tbody.appendChild(r));
+  if (noResultsRow) {
+    tbody.appendChild(noResultsRow);
+  }
 }
+
+// -------------------------------------------------------------
+// Extended Filtering
+// -------------------------------------------------------------
+let currentScorePreset = 'all';
+const minAlertThreshold = {{.MinAlertScore}};
+
+function setScorePreset(preset, btn) {
+  currentScorePreset = preset;
+  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function setPricePreset(preset, btn) {
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const minInput = document.getElementById('minPrice');
+  const maxInput = document.getElementById('maxPrice');
+
+  if (preset === 'under50') {
+    minInput.value = '';
+    maxInput.value = '50';
+  } else if (preset === '50to150') {
+    minInput.value = '50';
+    maxInput.value = '150';
+  } else if (preset === 'over150') {
+    minInput.value = '150';
+    maxInput.value = '';
+  } else {
+    minInput.value = '';
+    maxInput.value = '';
+  }
+  applyFilters();
+}
+
+function onPriceInput() {
+  // Clear preset selection if user inputs custom values
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  applyFilters();
+}
+
+function applyFilters() {
+  const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+  const source = (document.getElementById('sourceFilter').value || '').toLowerCase();
+  const status = document.getElementById('statusFilter').value;
+  const photoOnly = document.getElementById('photoFilter').checked;
+
+  const minPriceVal = parseFloat(document.getElementById('minPrice').value);
+  const maxPriceVal = parseFloat(document.getElementById('maxPrice').value);
+
+  const rows = document.querySelectorAll('#listingsTable tbody tr.listing-row');
+  let visibleCount = 0;
+
+  rows.forEach(r => {
+    const rScore = parseInt(r.dataset.score || '0', 10);
+    const rPrice = parseFloat(r.dataset.price || '0');
+    const rSource = (r.dataset.source || '').toLowerCase();
+    const rStatus = r.dataset.status;
+    const rPhoto = r.dataset.photo;
+    const rText = r.innerText.toLowerCase();
+
+    // 1. Text Search
+    let matchText = true;
+    if (query) {
+      matchText = rText.includes(query);
+    }
+
+    // 2. Score Preset Filter
+    let matchScore = true;
+    if (currentScorePreset === 'candidates') {
+      matchScore = rScore >= minAlertThreshold;
+    } else if (currentScorePreset === 'med') {
+      matchScore = rScore >= 50;
+    } else if (currentScorePreset === 'high') {
+      matchScore = rScore >= 75;
+    } else if (currentScorePreset === 'low') {
+      matchScore = rScore < 50;
+    }
+
+    // 3. Source Filter
+    let matchSource = true;
+    if (source) {
+      matchSource = rSource === source;
+    }
+
+    // 4. Alert Status Filter
+    let matchStatus = true;
+    if (status === 'alerted') {
+      matchStatus = rStatus === '1';
+    } else if (status === 'unalerted') {
+      matchStatus = rStatus === '0';
+    }
+
+    // 5. Photo Filter
+    let matchPhoto = true;
+    if (photoOnly) {
+      matchPhoto = rPhoto === '1';
+    }
+
+    // 6. Price Range
+    let matchPrice = true;
+    if (!isNaN(minPriceVal) && rPrice < minPriceVal) {
+      matchPrice = false;
+    }
+    if (!isNaN(maxPriceVal) && rPrice > maxPriceVal) {
+      matchPrice = false;
+    }
+
+    const isVisible = matchText && matchScore && matchSource && matchStatus && matchPhoto && matchPrice;
+    r.style.display = isVisible ? '' : 'none';
+    if (isVisible) visibleCount++;
+  });
+
+  const countEl = document.getElementById('visibleCount');
+  if (countEl) countEl.innerText = visibleCount;
+
+  const noResultsRow = document.getElementById('noResultsRow');
+  if (noResultsRow) {
+    noResultsRow.style.display = (visibleCount === 0 && rows.length > 0) ? '' : 'none';
+  }
+}
+
+function resetFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('sourceFilter').value = '';
+  document.getElementById('statusFilter').value = '';
+  document.getElementById('photoFilter').checked = false;
+  document.getElementById('minPrice').value = '';
+  document.getElementById('maxPrice').value = '';
+
+  currentScorePreset = 'all';
+  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+  const allScoreBtn = document.getElementById('scoreBtnAll');
+  if (allScoreBtn) allScoreBtn.classList.add('active');
+
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  const allPriceBtn = document.getElementById('priceBtnAll');
+  if (allPriceBtn) allPriceBtn.classList.add('active');
+
+  applyFilters();
+}
+
+// Perform initial sort on page load
+document.addEventListener('DOMContentLoaded', () => {
+  sortRows();
+});
 </script>
 </body>
 </html>`
