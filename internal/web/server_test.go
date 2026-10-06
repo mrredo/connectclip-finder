@@ -92,6 +92,15 @@ func TestDashboardServer(t *testing.T) {
 			`id="visibleCount"`,
 			`id="lang-btn-lv"`,
 			`id="lang-btn-en"`,
+			`id="viewModePagination"`,
+			`id="viewModeInfinite"`,
+			`id="pageSizeSelect"`,
+			`id="paginationContainer"`,
+			`id="infiniteContainer"`,
+			`id="infiniteSentinel"`,
+			`id="btnLoadMore"`,
+			`data-i18n="view_pagination"`,
+			`data-i18n="view_infinite"`,
 			`data-i18n="`,
 		}
 		for _, el := range filterElements {

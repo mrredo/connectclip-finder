@@ -384,12 +384,129 @@ const dashboardHTML = `<!DOCTYPE html>
   }
   .result-counter strong { color: #fff; }
 
-  /* Table */
+  /* View Mode Switcher */
+  .view-switch {
+    display: inline-flex;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .view-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .view-btn.active {
+    background: #0284c7;
+    color: #fff;
+  }
+  .view-btn:hover:not(.active) {
+    color: #fff;
+    background: #1e293b;
+  }
+
+  /* Table Container & Bottom Navigation Bars */
   .table-container {
     background: var(--card);
     border: 1px solid var(--card-border);
-    border-radius: 8px;
+    border-radius: 8px 8px 0 0;
     overflow-x: auto;
+  }
+  .pagination-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 20px;
+    background: #172033;
+    border: 1px solid var(--card-border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    margin-bottom: 24px;
+  }
+  .pagination-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .page-btn {
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    color: var(--text);
+    padding: 6px 11px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 34px;
+    text-align: center;
+  }
+  .page-btn:hover:not(:disabled):not(.active) {
+    background: #1e293b;
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .page-btn.active {
+    background: #0284c7;
+    border-color: #38bdf8;
+    color: #fff;
+  }
+  .page-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .page-ellipsis {
+    color: var(--text-muted);
+    padding: 0 4px;
+    font-size: 0.85rem;
+  }
+
+  /* Infinite Scroll Bar */
+  .infinite-bar {
+    text-align: center;
+    padding: 20px 20px;
+    background: #172033;
+    border: 1px solid var(--card-border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .infinite-status {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .infinite-spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(56, 189, 248, 0.2);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   table {
     width: 100%;
@@ -610,6 +727,34 @@ const dashboardHTML = `<!DOCTYPE html>
         Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{len .Listings}} listings
       </div>
     </div>
+
+    <!-- Filter Controls Row 3: View Mode & Page Size -->
+    <div class="controls-row" style="padding-top: 8px; border-top: 1px solid rgba(51, 65, 85, 0.4);">
+      <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+        <!-- View Mode Segmented Switch -->
+        <div class="view-switch">
+          <button id="viewModePagination" class="view-btn active" onclick="setViewMode('pagination')">
+            <span data-i18n="view_pagination">📄 Pagination</span>
+          </button>
+          <button id="viewModeInfinite" class="view-btn" onclick="setViewMode('infinite')">
+            <span data-i18n="view_infinite">♾️ Infinite Scroll</span>
+          </button>
+        </div>
+
+        <!-- Page Size Selector -->
+        <div style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-muted);">
+          <span data-i18n="label_per_page">Per page:</span>
+          <select id="pageSizeSelect" class="filter-select" style="padding: 5px 10px;" onchange="onPageSizeChange()">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="viewModeInfo" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+    </div>
   </div>
 
   <div class="table-container">
@@ -723,6 +868,24 @@ const dashboardHTML = `<!DOCTYPE html>
       </tbody>
     </table>
   </div>
+
+  <!-- Pagination Bottom Bar -->
+  <div id="paginationContainer" class="pagination-bar">
+    <div id="paginationInfo" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+    <div id="paginationNav" class="pagination-nav"></div>
+  </div>
+
+  <!-- Infinite Scroll Bottom Bar -->
+  <div id="infiniteContainer" class="infinite-bar" style="display: none;">
+    <div id="infiniteSentinel" style="height: 1px; width: 100%;"></div>
+    <div id="infiniteStatus" class="infinite-status">
+      <span class="infinite-spinner" id="infiniteSpinner" style="display: none;"></span>
+      <span id="infiniteStatusText" data-i18n="loading_more">Loading more listings...</span>
+    </div>
+    <button id="btnLoadMore" class="btn btn-secondary btn-sm" onclick="loadMoreInfinite()" data-i18n="load_more_btn">
+      Load More
+    </button>
+  </div>
 </div>
 
 <script>
@@ -764,6 +927,16 @@ const i18n = {
     price_under50: "< €50",
     price_target: "€50 – €150 (Target)",
     price_over150: "> €150",
+    view_pagination: "📄 Pagination",
+    view_infinite: "♾️ Infinite Scroll",
+    label_per_page: "Per page:",
+    page_first: "« First",
+    page_prev: "‹ Prev",
+    page_next: "Next ›",
+    page_last: "Last »",
+    loading_more: "Loading more listings...",
+    all_loaded: "✓ All listings displayed",
+    load_more_btn: "Load More",
     th_photo: "Photo",
     th_score: "Score",
     th_title: "Title & Details",
@@ -811,6 +984,16 @@ const i18n = {
     price_under50: "< 50 €",
     price_target: "50 – 150 € (Mērķis)",
     price_over150: "> 150 €",
+    view_pagination: "📄 Lapošana",
+    view_infinite: "♾️ Bezgalīgā ritināšana",
+    label_per_page: "Lapas izmērs:",
+    page_first: "« Pirmā",
+    page_prev: "‹ Iepriekšējā",
+    page_next: "Nākamā ›",
+    page_last: "Pēdējā »",
+    loading_more: "Ielādē vairāk sludinājumu...",
+    all_loaded: "✓ Visi sludinājumi parādīti",
+    load_more_btn: "Ielādēt vairāk",
     th_photo: "Foto",
     th_score: "Atbilstība",
     th_title: "Nosaukums un apraksts",
@@ -831,6 +1014,101 @@ const i18n = {
 };
 
 let currentLang = 'en';
+
+// Display & Pagination State
+let currentViewMode = 'pagination'; // 'pagination' or 'infinite'
+let currentPage = 1;
+let pageSize = 50;
+let infiniteVisibleLimit = 50;
+let isInfiniteLoading = false;
+let matchedRows = [];
+
+function setViewMode(mode) {
+  if (mode !== 'pagination' && mode !== 'infinite') return;
+  currentViewMode = mode;
+
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = (mode === 'pagination') ? document.getElementById('viewModePagination') : document.getElementById('viewModeInfinite');
+  if (activeBtn) activeBtn.classList.add('active');
+
+  try {
+    localStorage.setItem('cc_finder_view_mode', mode);
+  } catch (e) {}
+
+  currentPage = 1;
+  infiniteVisibleLimit = pageSize;
+  renderDisplay();
+}
+
+function onPageSizeChange() {
+  const sel = document.getElementById('pageSizeSelect');
+  if (!sel) return;
+  pageSize = parseInt(sel.value, 10) || 50;
+  currentPage = 1;
+  infiniteVisibleLimit = pageSize;
+
+  try {
+    localStorage.setItem('cc_finder_page_size', pageSize);
+  } catch (e) {}
+
+  renderDisplay();
+}
+
+function goToPage(page) {
+  const totalPages = Math.max(1, Math.ceil(matchedRows.length / pageSize));
+  if (page < 1) page = 1;
+  if (page > totalPages) page = totalPages;
+  currentPage = page;
+  renderDisplay();
+
+  const tableEl = document.getElementById('listingsTable');
+  if (tableEl) {
+    tableEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function loadMoreInfinite() {
+  if (isInfiniteLoading || infiniteVisibleLimit >= matchedRows.length) return;
+  isInfiniteLoading = true;
+
+  const spinner = document.getElementById('infiniteSpinner');
+  if (spinner) spinner.style.display = 'inline-block';
+
+  setTimeout(() => {
+    infiniteVisibleLimit += pageSize;
+    isInfiniteLoading = false;
+    if (spinner) spinner.style.display = 'none';
+    renderDisplay();
+  }, 100);
+}
+
+let infiniteObserver;
+function setupInfiniteObserver() {
+  if (!('IntersectionObserver' in window)) return;
+  const sentinel = document.getElementById('infiniteSentinel');
+  if (!sentinel) return;
+  if (infiniteObserver) infiniteObserver.disconnect();
+
+  infiniteObserver = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && currentViewMode === 'infinite') {
+      if (infiniteVisibleLimit < matchedRows.length) {
+        loadMoreInfinite();
+      }
+    }
+  }, { rootMargin: '250px' });
+
+  infiniteObserver.observe(sentinel);
+}
+
+window.addEventListener('scroll', () => {
+  if (currentViewMode !== 'infinite') return;
+  if (infiniteVisibleLimit >= matchedRows.length) return;
+  const scrollPos = window.innerHeight + window.scrollY;
+  const bottomPos = document.documentElement.offsetHeight - 300;
+  if (scrollPos >= bottomPos) {
+    loadMoreInfinite();
+  }
+}, { passive: true });
 
 function setLanguage(lang) {
   if (!i18n[lang]) return;
@@ -876,7 +1154,7 @@ function setLanguage(lang) {
     }
   });
 
-  applyFilters();
+  renderDisplay();
 
   try {
     localStorage.setItem('cc_finder_lang', lang);
@@ -957,10 +1235,12 @@ function sortRows() {
   if (noResultsRow) {
     tbody.appendChild(noResultsRow);
   }
+
+  applyFilters();
 }
 
 // -------------------------------------------------------------
-// Extended Filtering
+// Extended Filtering & Rendering
 // -------------------------------------------------------------
 let currentScorePreset = 'all';
 
@@ -1009,7 +1289,7 @@ function applyFilters() {
   const maxPriceVal = parseFloat(document.getElementById('maxPrice').value);
 
   const rows = document.querySelectorAll('#listingsTable tbody tr.listing-row');
-  let visibleCount = 0;
+  matchedRows = [];
 
   rows.forEach(r => {
     const rScore = parseInt(r.dataset.score || '0', 10);
@@ -1066,24 +1346,181 @@ function applyFilters() {
       matchPrice = false;
     }
 
-    const isVisible = matchText && matchScore && matchSource && matchStatus && matchPhoto && matchPrice;
-    r.style.display = isVisible ? '' : 'none';
-    if (isVisible) visibleCount++;
+    if (matchText && matchScore && matchSource && matchStatus && matchPhoto && matchPrice) {
+      matchedRows.push(r);
+    }
   });
 
-  const counterWrapper = document.getElementById('visibleCounterWrapper');
-  if (counterWrapper) {
+  currentPage = 1;
+  infiniteVisibleLimit = pageSize;
+  renderDisplay();
+}
+
+function renderDisplay() {
+  const dict = i18n[currentLang];
+  const totalMatched = matchedRows.length;
+  const allRows = document.querySelectorAll('#listingsTable tbody tr.listing-row');
+  const noResultsRow = document.getElementById('noResultsRow');
+  const paginationContainer = document.getElementById('paginationContainer');
+  const infiniteContainer = document.getElementById('infiniteContainer');
+
+  if (totalMatched === 0) {
+    allRows.forEach(r => r.style.display = 'none');
+    if (noResultsRow) noResultsRow.style.display = (allRows.length > 0) ? '' : 'none';
+    if (paginationContainer) paginationContainer.style.display = 'none';
+    if (infiniteContainer) infiniteContainer.style.display = 'none';
+
+    const counterWrapper = document.getElementById('visibleCounterWrapper');
+    if (counterWrapper) {
+      if (currentLang === 'lv') {
+        counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">0</strong> no ' + totalListingCount + ' sludinājumiem';
+      } else {
+        counterWrapper.innerHTML = 'Showing <strong id="visibleCount">0</strong> of ' + totalListingCount + ' listings';
+      }
+    }
+    const viewModeInfo = document.getElementById('viewModeInfo');
+    if (viewModeInfo) viewModeInfo.innerText = '';
+    return;
+  }
+
+  if (noResultsRow) noResultsRow.style.display = 'none';
+
+  // Hide all rows initially
+  allRows.forEach(r => r.style.display = 'none');
+
+  if (currentViewMode === 'pagination') {
+    if (paginationContainer) paginationContainer.style.display = 'flex';
+    if (infiniteContainer) infiniteContainer.style.display = 'none';
+
+    const totalPages = Math.max(1, Math.ceil(totalMatched / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalMatched);
+
+    for (let i = startIndex; i < endIndex; i++) {
+      matchedRows[i].style.display = '';
+    }
+
+    renderPaginationNav(currentPage, totalPages);
+
+    const paginationInfo = document.getElementById('paginationInfo');
+    const counterWrapper = document.getElementById('visibleCounterWrapper');
+    const viewModeInfo = document.getElementById('viewModeInfo');
+
+    const dispRange = (startIndex + 1) + '–' + endIndex;
     if (currentLang === 'lv') {
-      counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + visibleCount + '</strong> no ' + totalListingCount + ' sludinājumiem';
+      const infoText = 'Rāda <strong>' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem (Lapa ' + currentPage + ' no ' + totalPages + ')';
+      if (paginationInfo) paginationInfo.innerHTML = infoText;
+      if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + dispRange + '</strong> no ' + totalListingCount + ' sludinājumiem';
+      if (viewModeInfo) viewModeInfo.innerText = currentPage + '. no ' + totalPages + ' lapām';
     } else {
-      counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + visibleCount + '</strong> of ' + totalListingCount + ' listings';
+      const infoText = 'Showing <strong>' + dispRange + '</strong> of ' + totalMatched + ' listings (Page ' + currentPage + ' of ' + totalPages + ')';
+      if (paginationInfo) paginationInfo.innerHTML = infoText;
+      if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + dispRange + '</strong> of ' + totalListingCount + ' listings';
+      if (viewModeInfo) viewModeInfo.innerText = 'Page ' + currentPage + ' of ' + totalPages;
+    }
+  } else {
+    // Infinite Scroll Mode
+    if (paginationContainer) paginationContainer.style.display = 'none';
+    if (infiniteContainer) infiniteContainer.style.display = 'flex';
+
+    const visibleEnd = Math.min(infiniteVisibleLimit, totalMatched);
+    for (let i = 0; i < visibleEnd; i++) {
+      matchedRows[i].style.display = '';
+    }
+
+    const counterWrapper = document.getElementById('visibleCounterWrapper');
+    const viewModeInfo = document.getElementById('viewModeInfo');
+    const statusText = document.getElementById('infiniteStatusText');
+    const btnLoadMore = document.getElementById('btnLoadMore');
+
+    if (currentLang === 'lv') {
+      if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + visibleEnd + '</strong> no ' + totalListingCount + ' sludinājumiem';
+      if (viewModeInfo) viewModeInfo.innerText = 'Ielādēti ' + visibleEnd + ' no ' + totalMatched;
+    } else {
+      if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + visibleEnd + '</strong> of ' + totalListingCount + ' listings';
+      if (viewModeInfo) viewModeInfo.innerText = 'Loaded ' + visibleEnd + ' of ' + totalMatched;
+    }
+
+    if (visibleEnd >= totalMatched) {
+      if (statusText) statusText.innerText = dict.all_loaded + ' (' + totalMatched + ')';
+      if (btnLoadMore) btnLoadMore.style.display = 'none';
+    } else {
+      if (statusText) statusText.innerText = (currentLang === 'lv' ? 'Parādīti ' : 'Displayed ') + visibleEnd + ' / ' + totalMatched;
+      if (btnLoadMore) btnLoadMore.style.display = 'inline-block';
+    }
+  }
+}
+
+function renderPaginationNav(currentPage, totalPages) {
+  const nav = document.getElementById('paginationNav');
+  if (!nav) return;
+  nav.innerHTML = '';
+
+  const dict = i18n[currentLang];
+
+  // First button
+  const firstBtn = document.createElement('button');
+  firstBtn.className = 'page-btn';
+  firstBtn.innerHTML = dict.page_first;
+  firstBtn.disabled = (currentPage === 1);
+  firstBtn.onclick = () => goToPage(1);
+  nav.appendChild(firstBtn);
+
+  // Prev button
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'page-btn';
+  prevBtn.innerHTML = dict.page_prev;
+  prevBtn.disabled = (currentPage === 1);
+  prevBtn.onclick = () => goToPage(currentPage - 1);
+  nav.appendChild(prevBtn);
+
+  // Pages windowing
+  let pages = [];
+  if (totalPages <= 7) {
+    for (let p = 1; p <= totalPages; p++) pages.push(p);
+  } else {
+    if (currentPage <= 4) {
+      pages = [1, 2, 3, 4, 5, '...', totalPages];
+    } else if (currentPage >= totalPages - 3) {
+      pages = [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    } else {
+      pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
     }
   }
 
-  const noResultsRow = document.getElementById('noResultsRow');
-  if (noResultsRow) {
-    noResultsRow.style.display = (visibleCount === 0 && rows.length > 0) ? '' : 'none';
-  }
+  pages.forEach(p => {
+    if (p === '...') {
+      const span = document.createElement('span');
+      span.className = 'page-ellipsis';
+      span.innerText = '…';
+      nav.appendChild(span);
+    } else {
+      const pageBtn = document.createElement('button');
+      pageBtn.className = 'page-btn' + (p === currentPage ? ' active' : '');
+      pageBtn.innerText = p;
+      pageBtn.onclick = () => goToPage(p);
+      nav.appendChild(pageBtn);
+    }
+  });
+
+  // Next button
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'page-btn';
+  nextBtn.innerHTML = dict.page_next;
+  nextBtn.disabled = (currentPage === totalPages);
+  nextBtn.onclick = () => goToPage(currentPage + 1);
+  nav.appendChild(nextBtn);
+
+  // Last button
+  const lastBtn = document.createElement('button');
+  lastBtn.className = 'page-btn';
+  lastBtn.innerHTML = dict.page_last;
+  lastBtn.disabled = (currentPage === totalPages);
+  lastBtn.onclick = () => goToPage(totalPages);
+  nav.appendChild(lastBtn);
 }
 
 function resetFilters() {
@@ -1108,18 +1545,39 @@ function resetFilters() {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-  sortRows();
   try {
+    const savedMode = localStorage.getItem('cc_finder_view_mode');
+    if (savedMode === 'pagination' || savedMode === 'infinite') {
+      currentViewMode = savedMode;
+      document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = (savedMode === 'pagination') ? document.getElementById('viewModePagination') : document.getElementById('viewModeInfinite');
+      if (activeBtn) activeBtn.classList.add('active');
+    }
+
+    const savedPageSize = localStorage.getItem('cc_finder_page_size');
+    if (savedPageSize) {
+      const parsed = parseInt(savedPageSize, 10);
+      if ([25, 50, 100, 200].includes(parsed)) {
+        pageSize = parsed;
+        const sel = document.getElementById('pageSizeSelect');
+        if (sel) sel.value = String(parsed);
+      }
+    }
+
     const urlLang = new URLSearchParams(window.location.search).get('lang');
     const savedLang = localStorage.getItem('cc_finder_lang');
     if (urlLang === 'lv' || urlLang === 'en') {
-      setLanguage(urlLang);
+      currentLang = urlLang;
     } else if (savedLang === 'lv' || savedLang === 'en') {
-      setLanguage(savedLang);
+      currentLang = savedLang;
     } else if (navigator.language && navigator.language.startsWith('lv')) {
-      setLanguage('lv');
+      currentLang = 'lv';
     }
   } catch (e) {}
+
+  setLanguage(currentLang);
+  sortRows();
+  setupInfiniteObserver();
 });
 </script>
 </body>
