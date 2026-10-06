@@ -2,15 +2,22 @@ package sources
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectclip-finder/internal/model"
+)
+
+var (
+	vintedOverlayRegex = regexp.MustCompile(`<a\s+href="(/items/(\d+)-[^"]*)"[^>]*title="([^"]+)"`)
+	vintedImgRegex     = regexp.MustCompile(`<img[^>]+src="([^"]+)"[^>]*data-testid="product-item-id-(\d+)--image--img"`)
+	vintedPriceRegex   = regexp.MustCompile(`([\d\s]+(?:[.,]\d+)?)\s*€`)
 )
 
 // VintedAdapter queries Vinted's catalog search endpoint.
@@ -44,34 +51,16 @@ func (v *VintedAdapter) IsEnabled() bool {
 	return v.enabled
 }
 
-type vintedResponse struct {
-	Items []struct {
-		ID    int64  `json:"id"`
-		Title string `json:"title"`
-		Price struct {
-			Amount       string `json:"amount"`
-			CurrencyCode string `json:"currency_code"`
-		} `json:"price"`
-		URL   string `json:"url"`
-		Photo struct {
-			URL string `json:"url"`
-		} `json:"photo"`
-		User struct {
-			Login string `json:"login"`
-		} `json:"user"`
-	} `json:"items"`
-}
-
 // Search executes a search on Vinted catalog.
 func (v *VintedAdapter) Search(ctx context.Context, query string) ([]*model.Listing, error) {
-	searchURL := fmt.Sprintf("https://www.vinted.lv/api/v2/catalog/items?search_text=%s&per_page=20", url.QueryEscape(query))
+	searchURL := fmt.Sprintf("https://www.vinted.lv/catalog?search_text=%s", url.QueryEscape(query))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", v.userAgent)
-	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "lv,en;q=0.9")
 
 	if v.sessionCookie != "" {
@@ -97,40 +86,60 @@ func (v *VintedAdapter) Search(ctx context.Context, query string) ([]*model.List
 		return nil, fmt.Errorf("failed to read vinted response body: %w", err)
 	}
 
-	var data vintedResponse
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, fmt.Errorf("failed to parse vinted JSON response: %w", err)
+	htmlContent := string(body)
+
+	// Map images by item ID
+	imagesByID := make(map[string]string)
+	for _, m := range vintedImgRegex.FindAllStringSubmatch(htmlContent, -1) {
+		if len(m) >= 3 {
+			imagesByID[m[2]] = m[1]
+		}
 	}
 
+	matches := vintedOverlayRegex.FindAllStringSubmatch(htmlContent, -1)
+	seen := make(map[string]bool)
 	var listings []*model.Listing
-	for _, item := range data.Items {
-		price, _ := strconv.ParseFloat(item.Price.Amount, 64)
-		currency := item.Price.CurrencyCode
-		if currency == "" {
-			currency = "EUR"
+
+	for _, m := range matches {
+		if len(m) < 4 {
+			continue
+		}
+		itemPath := m[1]
+		itemID := m[2]
+		rawTitle := m[3]
+
+		if seen[itemID] {
+			continue
+		}
+		seen[itemID] = true
+
+		// Split title (e.g. "Baterie, Zīmols: Oticon, Stāvoklis: Jauna prece ar etiķetēm, 5.77 €, 6.76 €")
+		titleParts := strings.Split(rawTitle, ",")
+		title := strings.TrimSpace(titleParts[0])
+
+		var price float64
+		if pMatch := vintedPriceRegex.FindStringSubmatch(rawTitle); len(pMatch) > 1 {
+			pStr := strings.ReplaceAll(pMatch[1], " ", "")
+			pStr = strings.ReplaceAll(pStr, "\u00a0", "")
+			pStr = strings.ReplaceAll(pStr, ",", ".")
+			price, _ = strconv.ParseFloat(pStr, 64)
 		}
 
 		var images []string
-		if item.Photo.URL != "" {
-			images = append(images, item.Photo.URL)
-		}
-
-		itemURL := item.URL
-		if itemURL != "" && itemURL[0] == '/' {
-			itemURL = "https://www.vinted.lv" + itemURL
+		if img, ok := imagesByID[itemID]; ok && img != "" {
+			images = append(images, img)
 		}
 
 		listings = append(listings, &model.Listing{
 			Source:      model.SourceVinted,
-			SourceID:    strconv.FormatInt(item.ID, 10),
-			URL:         itemURL,
-			Title:       item.Title,
-			Description: "Vinted Catalog Listing",
+			SourceID:    itemID,
+			URL:         "https://www.vinted.lv" + itemPath,
+			Title:       title,
+			Description: rawTitle,
 			Price:       price,
-			Currency:    currency,
+			Currency:    "EUR",
 			ImageURLs:   images,
 			Location:    "Latvija / Baltics",
-			Seller:      item.User.Login,
 		})
 	}
 
