@@ -125,6 +125,10 @@ Once started, open **[http://localhost:8080](http://localhost:8080)** in your br
 - **View Mode Switcher:**
   - Click `[ 📄 Pagination ]` to browse fixed pages (25, 50, 100, 200 items per page).
   - Click `[ ♾️ Infinite Scroll ]` to automatically load items as you scroll down.
+- **Dual Pagination (Top & Bottom):** Navigate pages conveniently using synchronized pagination controls located both above and below the listings table.
+- **Grouped Filter Cards & Interactive Sliders:**
+  - **Price Range Dual Slider:** Drag min/max price sliders or type values with real-time range badges.
+  - **Match Score Threshold Slider:** Slide anywhere from 0% to 100% (with quick presets for Candidates $\ge 70\%$, Medium $\ge 50\%$, High $\ge 75\%$).
+  - **Search & Marketplaces Card:** Search input, source dropdown, status filter, and photo-only toggle neatly grouped.
 - **Sorting:** Click any column header (`Score`, `Title`, `Source`, `Price`, `Location`, `Last Seen`) to toggle ascending/descending order.
-- **Filtering:** Use the search bar, source selector, alert status, photo-only filter, and price bounds to narrow down results.
 - **Manual Scan Trigger:** Click `🔄 Sākt meklēšanu tagad` / `🔄 Trigger Scan Now` to trigger an immediate scrape in the background for this product.

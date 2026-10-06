@@ -1210,29 +1210,133 @@ const dashboardHTML = `<!DOCTYPE html>
   .stat-val { font-size: 1.8rem; font-weight: 700; color: #fff; }
   .stat-val.high { color: var(--high); }
 
-  /* Controls & Filters */
+  /* Controls & Grouped Filters Panel */
   .table-controls {
     background: var(--card);
     border: 1px solid var(--card-border);
-    padding: 18px 20px;
-    border-radius: 8px;
+    padding: 16px 20px;
+    border-radius: 10px;
     margin-bottom: 16px;
     display: flex;
     flex-direction: column;
     gap: 14px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
   }
-  .controls-row {
+  .filters-top-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+  }
+  .filters-top-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .filters-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .filters-grouped-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .filter-card {
+    background: #141f33;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .filter-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f1f5f9;
+  }
+  .filter-pill-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--primary);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    font-weight: 600;
+  }
+  .filter-pill-badge.high {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--high);
+    border-color: rgba(34, 197, 94, 0.3);
+  }
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .slider-lbl {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    min-width: 32px;
+  }
+  .slider-val-tag {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #fff;
+    min-width: 44px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .custom-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: #334155;
+    border-radius: 9999px;
+    outline: none;
+    cursor: pointer;
+  }
+  .custom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #38bdf8;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+    cursor: pointer;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .custom-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    background: #0284c7;
+  }
+  .custom-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #38bdf8;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+    cursor: pointer;
   }
   .search-wrap {
     position: relative;
-    flex: 1;
-    min-width: 260px;
-    max-width: 380px;
+    width: 100%;
   }
   .search-input {
     background: #0f172a;
@@ -1256,7 +1360,7 @@ const dashboardHTML = `<!DOCTYPE html>
     background: #0f172a;
     border: 1px solid var(--card-border);
     color: #fff;
-    padding: 8px 12px;
+    padding: 7px 10px;
     border-radius: 6px;
     font-size: 0.85rem;
     cursor: pointer;
@@ -1275,9 +1379,9 @@ const dashboardHTML = `<!DOCTYPE html>
     background: #0f172a;
     border: 1px solid var(--card-border);
     color: #fff;
-    padding: 7px 10px;
+    padding: 6px 8px;
     border-radius: 6px;
-    width: 78px;
+    width: 76px;
     font-size: 0.85rem;
   }
   .checkbox-label {
@@ -1292,7 +1396,7 @@ const dashboardHTML = `<!DOCTYPE html>
   .checkbox-label input { cursor: pointer; }
   .filter-group {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     flex-wrap: wrap;
     font-size: 0.85rem;
@@ -1302,10 +1406,10 @@ const dashboardHTML = `<!DOCTYPE html>
     background: transparent;
     border: 1px solid var(--card-border);
     color: var(--text-muted);
-    padding: 5px 11px;
+    padding: 4px 9px;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     transition: all 0.15s ease;
   }
   .filter-btn:hover { background: var(--card-border); color: #fff; }
@@ -1313,7 +1417,6 @@ const dashboardHTML = `<!DOCTYPE html>
   .result-counter {
     font-size: 0.85rem;
     color: var(--text-muted);
-    margin-left: auto;
   }
   .result-counter strong { color: #fff; }
 
@@ -1349,11 +1452,10 @@ const dashboardHTML = `<!DOCTYPE html>
     background: #1e293b;
   }
 
-  /* Table Container & Bottom Navigation Bars */
+  /* Table Container & Top/Bottom Navigation Bars */
   .table-container {
     background: var(--card);
     border: 1px solid var(--card-border);
-    border-radius: 8px 8px 0 0;
     overflow-x: auto;
   }
   .pagination-bar {
@@ -1362,11 +1464,17 @@ const dashboardHTML = `<!DOCTYPE html>
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
-    padding: 14px 20px;
+    padding: 12px 18px;
     background: #172033;
     border: 1px solid var(--card-border);
-    border-top: none;
+  }
+  .pagination-bar.pagination-top {
+    border-radius: 8px 8px 0 0;
+    border-bottom: none;
+  }
+  .pagination-bar.pagination-bottom {
     border-radius: 0 0 8px 8px;
+    border-top: none;
     margin-bottom: 24px;
   }
   .pagination-nav {
@@ -1603,91 +1711,127 @@ const dashboardHTML = `<!DOCTYPE html>
   </div>
 
   <div class="table-controls">
-    <!-- Filter Controls Row 1 -->
-    <div class="controls-row">
-      <div class="search-wrap">
-        <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="search_placeholder" placeholder="Search title, description, location, signals..." oninput="onSearchInput()">
+    <!-- Top Bar with Title, Reset, and Live Counter -->
+    <div class="filters-top-bar">
+      <div class="filters-top-title">
+        <span>🎛️</span>
+        <span data-i18n="filter_panel_title">Filters & Controls</span>
+      </div>
+      <div class="filters-top-actions">
+        <button class="btn btn-secondary btn-sm" onclick="resetFilters()">
+          <span data-i18n="btn_clear">✕ Clear</span>
+        </button>
+        <div class="result-counter" id="visibleCounterWrapper">
+          Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{.MatchedCount}} listings
+        </div>
+      </div>
+    </div>
+
+    <!-- Grouped Filter Cards Grid -->
+    <div class="filters-grouped-grid">
+      <!-- Card 1: Search & Sources -->
+      <div class="filter-card">
+        <div class="filter-card-header">
+          <span>🔍 <span data-i18n="filter_search_title">Search & Sources</span></span>
+        </div>
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="search_placeholder" placeholder="Search title, description, location, signals..." oninput="onSearchInput()">
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <select id="sourceFilter" class="filter-select" style="flex: 1; min-width: 120px;" onchange="applyFilters()">
+            <option value="" data-i18n="source_all">All Marketplaces</option>
+            {{range .Sources}}
+              <option value="{{.}}">{{.}}</option>
+            {{end}}
+          </select>
+          <select id="statusFilter" class="filter-select" style="flex: 1; min-width: 120px;" onchange="applyFilters()">
+            <option value="" data-i18n="status_all">All Alert Statuses</option>
+            <option value="alerted" data-i18n="status_alerted">🚨 Alerted Only</option>
+            <option value="unalerted" data-i18n="status_unalerted">Not Yet Alerted</option>
+          </select>
+        </div>
+        <div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="photoFilter" onchange="applyFilters()">
+            <span data-i18n="label_with_photo">📷 With photo</span>
+          </label>
+        </div>
       </div>
 
-      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-        <!-- Marketplace Source Filter -->
-        <select id="sourceFilter" class="filter-select" onchange="applyFilters()">
-          <option value="" data-i18n="source_all">All Marketplaces</option>
-          {{range .Sources}}
-            <option value="{{.}}">{{.}}</option>
-          {{end}}
-        </select>
-
-        <!-- Status Filter -->
-        <select id="statusFilter" class="filter-select" onchange="applyFilters()">
-          <option value="" data-i18n="status_all">All Alert Statuses</option>
-          <option value="alerted" data-i18n="status_alerted">🚨 Alerted Only</option>
-          <option value="unalerted" data-i18n="status_unalerted">Not Yet Alerted</option>
-        </select>
-
-        <!-- Price Range -->
+      <!-- Card 2: Price Range & Dual Sliders -->
+      <div class="filter-card">
+        <div class="filter-card-header">
+          <span>💶 <span data-i18n="filter_price_title">Price Range & Slider</span></span>
+          <span id="priceRangeDisplay" class="filter-pill-badge">All prices</span>
+        </div>
         <div class="price-inputs">
           <span data-i18n="label_price">Price:</span>
           <input type="number" id="minPrice" class="num-input" data-i18n-placeholder="price_min" placeholder="Min €" min="0" oninput="onPriceInput()">
           <span>–</span>
           <input type="number" id="maxPrice" class="num-input" data-i18n-placeholder="price_max" placeholder="Max €" min="0" oninput="onPriceInput()">
         </div>
-
-        <!-- Photos Only Checkbox -->
-        <label class="checkbox-label">
-          <input type="checkbox" id="photoFilter" onchange="applyFilters()">
-          <span data-i18n="label_with_photo">📷 With photo</span>
-        </label>
-
-        <!-- Reset Button -->
-        <button class="btn btn-secondary btn-sm" onclick="resetFilters()" data-i18n="btn_clear">✕ Clear</button>
-      </div>
-    </div>
-
-    <!-- Filter Controls Row 2: Presets & Counter -->
-    <div class="controls-row">
-      <!-- Score Presets -->
-      <div class="filter-group">
-        <span data-i18n="label_score">Score:</span>
-        <button id="scoreBtnAll" class="filter-btn score-btn active" onclick="setScorePreset('all', this)" data-i18n="score_all">All</button>
-        <button id="scoreBtnCandidates" class="filter-btn score-btn" onclick="setScorePreset('candidates', this)" data-i18n="score_candidates">Candidates (&ge;{{.MinAlertScore}}%)</button>
-        <button id="scoreBtnMed" class="filter-btn score-btn" onclick="setScorePreset('med', this)" data-i18n="score_med">Medium+ (&ge;50%)</button>
-        <button id="scoreBtnHigh" class="filter-btn score-btn" onclick="setScorePreset('high', this)" data-i18n="score_high">High (&ge;75%)</button>
-        <button id="scoreBtnLow" class="filter-btn score-btn" onclick="setScorePreset('low', this)" data-i18n="score_low">Low (&lt;50%)</button>
+        <!-- Dual Price Sliders -->
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div class="slider-row">
+            <span class="slider-lbl" data-i18n="slider_price_min">Min:</span>
+            <input type="range" id="priceMinSlider" class="custom-slider" min="0" max="500" step="5" value="0" oninput="onPriceSliderChange('min')">
+            <span id="priceMinVal" class="slider-val-tag">0€</span>
+          </div>
+          <div class="slider-row">
+            <span class="slider-lbl" data-i18n="slider_price_max">Max:</span>
+            <input type="range" id="priceMaxSlider" class="custom-slider" min="0" max="500" step="5" value="500" oninput="onPriceSliderChange('max')">
+            <span id="priceMaxVal" class="slider-val-tag">500€+</span>
+          </div>
+        </div>
+        <!-- Price Presets -->
+        <div class="filter-group">
+          <button id="priceBtnAll" class="filter-btn price-btn active" onclick="setPricePreset('all', this)" data-i18n="price_all">All</button>
+          <button id="priceBtnUnder50" class="filter-btn price-btn" onclick="setPricePreset('under50', this)" data-i18n="price_under50">&lt; €50</button>
+          <button id="priceBtnTarget" class="filter-btn price-btn" onclick="setPricePreset('50to150', this)" data-i18n="price_target">€50 – €150 (Target)</button>
+          <button id="priceBtnOver150" class="filter-btn price-btn" onclick="setPricePreset('over150', this)" data-i18n="price_over150">&gt; €150</button>
+        </div>
       </div>
 
-      <!-- Price Presets -->
-      <div class="filter-group">
-        <span data-i18n="label_price_range">Price Range:</span>
-        <button id="priceBtnAll" class="filter-btn price-btn active" onclick="setPricePreset('all', this)" data-i18n="price_all">All</button>
-        <button id="priceBtnUnder50" class="filter-btn price-btn" onclick="setPricePreset('under50', this)" data-i18n="price_under50">&lt; €50</button>
-        <button id="priceBtnTarget" class="filter-btn price-btn" onclick="setPricePreset('50to150', this)" data-i18n="price_target">€50 – €150 (Target)</button>
-        <button id="priceBtnOver150" class="filter-btn price-btn" onclick="setPricePreset('over150', this)" data-i18n="price_over150">&gt; €150</button>
+      <!-- Card 3: Match Score Threshold & Slider -->
+      <div class="filter-card">
+        <div class="filter-card-header">
+          <span>🎯 <span data-i18n="filter_score_title">Match Score Threshold</span></span>
+          <span id="scoreSliderBadge" class="filter-pill-badge high">≥ 0%</span>
+        </div>
+        <!-- Score Slider -->
+        <div class="slider-row">
+          <span class="slider-lbl" data-i18n="slider_score_label">Threshold:</span>
+          <input type="range" id="scoreSlider" class="custom-slider" min="0" max="100" step="5" value="0" oninput="onScoreSliderChange()">
+          <span id="scoreSliderValText" class="slider-val-tag">0%</span>
+        </div>
+        <!-- Score Presets -->
+        <div class="filter-group">
+          <button id="scoreBtnAll" class="filter-btn score-btn active" onclick="setScorePreset('all', this)" data-i18n="score_all">All</button>
+          <button id="scoreBtnCandidates" class="filter-btn score-btn" onclick="setScorePreset('candidates', this)" data-i18n="score_candidates">Candidates (&ge;{{.MinAlertScore}}%)</button>
+          <button id="scoreBtnMed" class="filter-btn score-btn" onclick="setScorePreset('med', this)" data-i18n="score_med">Medium+ (&ge;50%)</button>
+          <button id="scoreBtnHigh" class="filter-btn score-btn" onclick="setScorePreset('high', this)" data-i18n="score_high">High (&ge;75%)</button>
+          <button id="scoreBtnLow" class="filter-btn score-btn" onclick="setScorePreset('low', this)" data-i18n="score_low">Low (&lt;50%)</button>
+        </div>
       </div>
 
-      <!-- Live Counter -->
-      <div class="result-counter" id="visibleCounterWrapper">
-        Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{.MatchedCount}} listings
-      </div>
-    </div>
-
-    <!-- Filter Controls Row 3: View Mode & Page Size -->
-    <div class="controls-row" style="padding-top: 8px; border-top: 1px solid rgba(51, 65, 85, 0.4);">
-      <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+      <!-- Card 4: Display & View Mode -->
+      <div class="filter-card">
+        <div class="filter-card-header">
+          <span>⚙️ <span data-i18n="filter_view_title">View Mode & Navigation</span></span>
+        </div>
         <!-- View Mode Segmented Switch -->
-        <div class="view-switch">
-          <button id="viewModePagination" class="view-btn active" onclick="setViewMode('pagination')">
+        <div class="view-switch" style="width: 100%;">
+          <button id="viewModePagination" class="view-btn active" style="flex: 1; justify-content: center;" onclick="setViewMode('pagination')">
             <span data-i18n="view_pagination">📄 Pagination</span>
           </button>
-          <button id="viewModeInfinite" class="view-btn" onclick="setViewMode('infinite')">
+          <button id="viewModeInfinite" class="view-btn" style="flex: 1; justify-content: center;" onclick="setViewMode('infinite')">
             <span data-i18n="view_infinite">♾️ Infinite Scroll</span>
           </button>
         </div>
-
         <!-- Page Size Selector -->
-        <div style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-muted);">
-          <span data-i18n="label_per_page">Per page:</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <span style="font-size: 0.85rem; color: var(--text-muted);" data-i18n="label_per_page">Per page:</span>
           <select id="pageSizeSelect" class="filter-select" style="padding: 5px 10px;" onchange="onPageSizeChange()">
             <option value="25">25</option>
             <option value="50" selected>50</option>
@@ -1695,10 +1839,15 @@ const dashboardHTML = `<!DOCTYPE html>
             <option value="200">200</option>
           </select>
         </div>
+        <div id="viewModeInfo" style="font-size: 0.82rem; color: var(--text-muted); margin-top: auto;"></div>
       </div>
-
-      <div id="viewModeInfo" style="font-size: 0.85rem; color: var(--text-muted);"></div>
     </div>
+  </div>
+
+  <!-- Pagination Top Bar -->
+  <div id="paginationTopContainer" class="pagination-bar pagination-top">
+    <div id="paginationTopInfo" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+    <div id="paginationTopNav" class="pagination-nav"></div>
   </div>
 
   <div class="table-container">
@@ -1850,6 +1999,14 @@ const i18n = {
     stat_candidates: "Promising Candidates (≥" + minAlertThreshold + "%)",
     stat_notified: "Telegram Alerts Dispatched",
     stat_threshold: "Alert Threshold",
+    filter_panel_title: "Filters & Controls",
+    filter_search_title: "Search & Sources",
+    filter_price_title: "Price Range & Slider",
+    filter_score_title: "Match Score Threshold",
+    filter_view_title: "View Mode & Navigation",
+    slider_score_label: "Threshold:",
+    slider_price_min: "Min:",
+    slider_price_max: "Max:",
     search_placeholder: "Search title, description, location, signals...",
     source_all: "All Marketplaces",
     status_all: "All Alert Statuses",
@@ -1909,6 +2066,14 @@ const i18n = {
     stat_candidates: "Iespējamie kandidāti (≥" + minAlertThreshold + "%)",
     stat_notified: "Nosūtītie Telegram paziņojumi",
     stat_threshold: "Paziņojumu slieksnis",
+    filter_panel_title: "Filtri un vadība",
+    filter_search_title: "Meklēšana un portāli",
+    filter_price_title: "Cenas diapazons un slaideris",
+    filter_score_title: "Atbilstības slieksnis",
+    filter_view_title: "Skata režīms un lapošana",
+    slider_score_label: "Slieksnis:",
+    slider_price_min: "Min:",
+    slider_price_max: "Max:",
     search_placeholder: "Meklēt pēc nosaukuma, apraksta, vietas, pazīmēm...",
     source_all: "Visi portāli",
     status_all: "Visi paziņojumu statusi",
@@ -2076,14 +2241,19 @@ function fetchPage(targetPage, appendRows) {
 
   let minScore = '';
   let maxScore = '';
-  if (currentScorePreset === 'candidates') {
+  const scoreSliderEl = document.getElementById('scoreSlider');
+  const sliderScore = scoreSliderEl ? (parseInt(scoreSliderEl.value, 10) || 0) : 0;
+
+  if (currentScorePreset === 'low') {
+    maxScore = '49';
+  } else if (sliderScore > 0) {
+    minScore = String(sliderScore);
+  } else if (currentScorePreset === 'candidates') {
     minScore = String(minAlertThreshold);
   } else if (currentScorePreset === 'med') {
     minScore = '50';
   } else if (currentScorePreset === 'high') {
     minScore = '75';
-  } else if (currentScorePreset === 'low') {
-    maxScore = '49';
   }
 
   const params = new URLSearchParams({
@@ -2150,6 +2320,7 @@ function fetchPage(targetPage, appendRows) {
 
 function renderUI() {
   const dict = i18n[currentLang];
+  const paginationTopContainer = document.getElementById('paginationTopContainer');
   const paginationContainer = document.getElementById('paginationContainer');
   const infiniteContainer = document.getElementById('infiniteContainer');
   const counterWrapper = document.getElementById('visibleCounterWrapper');
@@ -2158,27 +2329,34 @@ function renderUI() {
   const currentlyLoadedCount = document.querySelectorAll('#listingsTable tbody tr.listing-row').length;
 
   if (currentViewMode === 'pagination') {
+    if (paginationTopContainer) paginationTopContainer.style.display = 'flex';
     if (paginationContainer) paginationContainer.style.display = 'flex';
     if (infiniteContainer) infiniteContainer.style.display = 'none';
 
-    renderPaginationNav(currentPage, totalPages);
+    renderPaginationNav(currentPage, totalPages, 'paginationTopNav');
+    renderPaginationNav(currentPage, totalPages, 'paginationNav');
 
     const startIndex = (currentPage - 1) * pageSize;
     const endIndex = Math.min(startIndex + currentlyLoadedCount, totalMatched);
     const dispRange = totalMatched > 0 ? (startIndex + 1) + '–' + endIndex : '0';
 
+    const paginationTopInfo = document.getElementById('paginationTopInfo');
     const paginationInfo = document.getElementById('paginationInfo');
+    let infoHTML = '';
     if (currentLang === 'lv') {
-      if (paginationInfo) paginationInfo.innerHTML = 'Rāda <strong>' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem (' + currentPage + '. no ' + totalPages + ' lapām)';
+      infoHTML = 'Rāda <strong>' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem (' + currentPage + '. no ' + totalPages + ' lapām)';
       if (counterWrapper) counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + dispRange + '</strong> no ' + totalMatched + ' sludinājumiem';
       if (viewModeInfo) viewModeInfo.innerText = currentPage + '. no ' + totalPages + ' lapām';
     } else {
-      if (paginationInfo) paginationInfo.innerHTML = 'Showing <strong>' + dispRange + '</strong> of ' + totalMatched + ' listings (Page ' + currentPage + ' of ' + totalPages + ')';
+      infoHTML = 'Showing <strong>' + dispRange + '</strong> of ' + totalMatched + ' listings (Page ' + currentPage + ' of ' + totalPages + ')';
       if (counterWrapper) counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + dispRange + '</strong> of ' + totalMatched + ' listings';
       if (viewModeInfo) viewModeInfo.innerText = 'Page ' + currentPage + ' of ' + totalPages;
     }
+    if (paginationTopInfo) paginationTopInfo.innerHTML = infoHTML;
+    if (paginationInfo) paginationInfo.innerHTML = infoHTML;
   } else {
     // Infinite Scroll Mode
+    if (paginationTopContainer) paginationTopContainer.style.display = 'none';
     if (paginationContainer) paginationContainer.style.display = 'none';
     if (infiniteContainer) infiniteContainer.style.display = 'flex';
 
@@ -2201,10 +2379,17 @@ function renderUI() {
       if (btnLoadMore) btnLoadMore.style.display = 'inline-block';
     }
   }
+
+  // Update localized price range badge
+  const minSlider = document.getElementById('priceMinSlider');
+  const maxSlider = document.getElementById('priceMaxSlider');
+  if (minSlider && maxSlider) {
+    updatePriceRangeBadge(parseInt(minSlider.value, 10) || 0, parseInt(maxSlider.value, 10) || 500);
+  }
 }
 
-function renderPaginationNav(currPage, totalPgs) {
-  const nav = document.getElementById('paginationNav');
+function renderPaginationNav(currPage, totalPgs, navId) {
+  const nav = document.getElementById(navId);
   if (!nav) return;
   nav.innerHTML = '';
 
@@ -2364,11 +2549,141 @@ function handleSort(col, headerEl) {
   fetchPage(1, false);
 }
 
+function onScoreSliderChange() {
+  const slider = document.getElementById('scoreSlider');
+  const val = parseInt(slider.value, 10) || 0;
+  const badge = document.getElementById('scoreSliderBadge');
+  const valText = document.getElementById('scoreSliderValText');
+
+  if (valText) valText.innerText = val + '%';
+  if (badge) badge.innerText = '≥ ' + val + '%';
+
+  document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
+  if (val === 0) {
+    currentScorePreset = 'all';
+    const btn = document.getElementById('scoreBtnAll');
+    if (btn) btn.classList.add('active');
+  } else if (val >= 75) {
+    currentScorePreset = 'high';
+    const btn = document.getElementById('scoreBtnHigh');
+    if (btn) btn.classList.add('active');
+  } else if (val >= minAlertThreshold) {
+    currentScorePreset = 'candidates';
+    const btn = document.getElementById('scoreBtnCandidates');
+    if (btn) btn.classList.add('active');
+  } else if (val >= 50) {
+    currentScorePreset = 'med';
+    const btn = document.getElementById('scoreBtnMed');
+    if (btn) btn.classList.add('active');
+  } else {
+    currentScorePreset = 'custom';
+  }
+
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    fetchPage(1, false);
+  }, 200);
+}
+
 function setScorePreset(preset, btn) {
   currentScorePreset = preset;
   document.querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+
+  const slider = document.getElementById('scoreSlider');
+  const badge = document.getElementById('scoreSliderBadge');
+  const valText = document.getElementById('scoreSliderValText');
+  let val = 0;
+
+  if (preset === 'all') {
+    val = 0;
+  } else if (preset === 'candidates') {
+    val = minAlertThreshold;
+  } else if (preset === 'med') {
+    val = 50;
+  } else if (preset === 'high') {
+    val = 75;
+  } else if (preset === 'low') {
+    val = 0;
+  }
+
+  if (slider) slider.value = val;
+  if (valText) valText.innerText = (preset === 'low' ? '< 50%' : val + '%');
+  if (badge) badge.innerText = (preset === 'low' ? '< 50%' : '≥ ' + val + '%');
+
   fetchPage(1, false);
+}
+
+function onPriceSliderChange(which) {
+  const minSlider = document.getElementById('priceMinSlider');
+  const maxSlider = document.getElementById('priceMaxSlider');
+  const minInput = document.getElementById('minPrice');
+  const maxInput = document.getElementById('maxPrice');
+  const minValTag = document.getElementById('priceMinVal');
+  const maxValTag = document.getElementById('priceMaxVal');
+
+  let minV = parseInt(minSlider.value, 10) || 0;
+  let maxV = parseInt(maxSlider.value, 10) || 500;
+
+  if (which === 'min' && minV > maxV) {
+    maxV = minV;
+    maxSlider.value = maxV;
+  } else if (which === 'max' && maxV < minV) {
+    minV = maxV;
+    minSlider.value = minV;
+  }
+
+  if (minValTag) minValTag.innerText = minV + '€';
+  if (maxValTag) maxValTag.innerText = (maxV >= 500 ? '500€+' : maxV + '€');
+
+  if (minInput) minInput.value = (minV > 0 ? minV : '');
+  if (maxInput) maxInput.value = (maxV < 500 ? maxV : '');
+
+  updatePriceRangeBadge(minV, maxV);
+
+  document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  if (minV === 0 && maxV >= 500) {
+    const b = document.getElementById('priceBtnAll');
+    if (b) b.classList.add('active');
+  }
+
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    fetchPage(1, false);
+  }, 250);
+}
+
+function updatePriceRangeBadge(minV, maxV) {
+  const badge = document.getElementById('priceRangeDisplay');
+  if (!badge) return;
+  if (minV <= 0 && maxV >= 500) {
+    badge.innerText = (currentLang === 'lv' ? 'Visas cenas' : 'All prices');
+  } else if (minV <= 0) {
+    badge.innerText = '≤ ' + maxV + ' €';
+  } else if (maxV >= 500) {
+    badge.innerText = '≥ ' + minV + ' €';
+  } else {
+    badge.innerText = minV + ' – ' + maxV + ' €';
+  }
+}
+
+function syncPriceSlidersFromInputs() {
+  const minInput = document.getElementById('minPrice');
+  const maxInput = document.getElementById('maxPrice');
+  const minSlider = document.getElementById('priceMinSlider');
+  const maxSlider = document.getElementById('priceMaxSlider');
+  const minValTag = document.getElementById('priceMinVal');
+  const maxValTag = document.getElementById('priceMaxVal');
+
+  let minV = minInput && minInput.value ? Math.max(0, parseInt(minInput.value, 10)) : 0;
+  let maxV = maxInput && maxInput.value ? Math.min(500, parseInt(maxInput.value, 10)) : 500;
+
+  if (minSlider) minSlider.value = Math.min(minV, 500);
+  if (maxSlider) maxSlider.value = Math.min(maxV, 500);
+  if (minValTag) minValTag.innerText = minV + '€';
+  if (maxValTag) maxValTag.innerText = (maxV >= 500 ? '500€+' : maxV + '€');
+
+  updatePriceRangeBadge(minV, maxV);
 }
 
 function setPricePreset(preset, btn) {
@@ -2391,11 +2706,14 @@ function setPricePreset(preset, btn) {
     minInput.value = '';
     maxInput.value = '';
   }
+
+  syncPriceSlidersFromInputs();
   fetchPage(1, false);
 }
 
 function onPriceInput() {
   document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
+  syncPriceSlidersFromInputs();
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(() => {
     fetchPage(1, false);
@@ -2430,6 +2748,14 @@ function resetFilters() {
   const allPriceBtn = document.getElementById('priceBtnAll');
   if (allPriceBtn) allPriceBtn.classList.add('active');
 
+  const scoreSlider = document.getElementById('scoreSlider');
+  if (scoreSlider) scoreSlider.value = 0;
+  const scoreBadge = document.getElementById('scoreSliderBadge');
+  if (scoreBadge) scoreBadge.innerText = '≥ 0%';
+  const scoreValText = document.getElementById('scoreSliderValText');
+  if (scoreValText) scoreValText.innerText = '0%';
+
+  syncPriceSlidersFromInputs();
   fetchPage(1, false);
 }
 
@@ -2533,6 +2859,7 @@ function init() {
   } catch (e) {}
 
   setLanguage(currentLang);
+  syncPriceSlidersFromInputs();
   renderUI();
   setupInfiniteObserver();
 }
