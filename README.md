@@ -1,6 +1,14 @@
 # ConnectClip Finder 🔍
 
-An automated, reliable marketplace monitoring daemon designed to find a lost **Oticon ConnectClip** hearing-aid accessory being resold online on Latvian second-hand marketplaces.
+An automated, reliable marketplace monitoring daemon designed to find a lost **Oticon ConnectClip** hearing-aid accessory or **any other target product** on Latvian second-hand marketplaces.
+
+---
+
+## 📚 Documentation
+
+- [🚀 **Quick Start Guide**](docs/QUICKSTART.md) — Fast-track setup, running binary or Docker, CLI modes, and dashboard walkthrough.
+- [⚙️ **Configuration Guide (`.env`)**](docs/CONFIGURATION.md) — Detailed explanation of all environment variables, Telegram setup, cookie export tips, and custom product examples (Nintendo Switch, AirPods, etc.).
+- [🧠 **Developer Docs & Architecture**](docs/ARCHITECTURE.md) — System internals, data flow, deterministic matching engine, SQLite WAL layer, and step-by-step tutorial for adding new marketplaces.
 
 ---
 

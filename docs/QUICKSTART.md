@@ -1,0 +1,123 @@
+# Quick Start Guide 🚀
+
+This guide explains how to get **ConnectClip Finder** up and running in under 2 minutes.
+
+---
+
+## 📋 Prerequisites
+
+You can run the application either with **Go (native binary)** or **Docker**:
+
+- **Native Go:** Go 1.22 or higher installed ([Download Go](https://go.dev/dl/))
+- **Docker:** Docker and Docker Compose installed ([Download Docker](https://www.docker.com/products/docker-desktop/))
+
+---
+
+## ⚡ 1. Fast Track (Run in 3 Steps)
+
+### Step 1: Clone the Repository
+```bash
+git clone https://github.com/mrredo/connectclip-finder.git
+cd connectclip-finder
+```
+
+### Step 2: Create Your Environment File
+```bash
+# Linux / macOS
+cp .env.example .env
+
+# Windows (PowerShell)
+Copy-Item .env.example .env
+```
+*(By default, `.env.example` is pre-configured to search for Oticon ConnectClip on public marketplaces without requiring any API keys or logins).*
+
+### Step 3: Run the Application
+```bash
+# Windows
+go run ./cmd/finder
+
+# Linux / macOS
+go run ./cmd/finder
+```
+
+Open your browser and navigate to:
+👉 **[http://localhost:8080](http://localhost:8080)**
+
+You will immediately see the bilingual web dashboard displaying tracked items!
+
+---
+
+## 🛠️ 2. Build a Standalone Binary
+
+You can compile a single standalone executable with no external runtime dependencies (pure Go, CGO-free):
+
+```powershell
+# Windows
+go build -o connectclip-finder.exe ./cmd/finder
+
+# Linux / macOS
+go build -o connectclip-finder ./cmd/finder
+```
+
+Run the compiled executable:
+```powershell
+# Windows
+.\connectclip-finder.exe
+
+# Linux / macOS
+./connectclip-finder
+```
+
+---
+
+## 🕹️ 3. Execution Modes & CLI Flags
+
+The binary includes several specialized operational modes:
+
+| Flag | Description | Example Usage |
+| :--- | :--- | :--- |
+| *(no flags)* | **Continuous Daemon Mode:** Runs background scrapers on schedule and hosts the web dashboard. | `.\connectclip-finder.exe` |
+| `-serve-only` | **Web Dashboard Only:** Serves the web UI without running background scraper routines. | `.\connectclip-finder.exe -serve-only` |
+| `-scan-once` | **Single Scan Cycle:** Runs a complete scan of all enabled marketplaces once, prints a summary, and exits. | `.\connectclip-finder.exe -scan-once` |
+| `-eval "<text>"` | **Match Tester:** Scores a listing title against the matching rules and outputs signal reasons. | `.\connectclip-finder.exe -eval "Oticon ConnectClip bezvadu mikrofons"` |
+| `-http <addr>` | **Custom Web Port:** Overrides the HTTP bind address from `.env`. | `.\connectclip-finder.exe -http :9000` |
+| `-no-http` | **Headless Mode:** Runs the background scraper daemon without starting the web dashboard. | `.\connectclip-finder.exe -no-http` |
+| `-test-telegram` | **Verify Telegram Alerts:** Sends a test notification to verify your bot token and chat ID. | `.\connectclip-finder.exe -test-telegram` |
+| `-config <path>` | **Custom Config Path:** Loads a custom `.env` file from another directory. | `.\connectclip-finder.exe -config custom.env` |
+
+---
+
+## 🐳 4. Running with Docker & Docker Compose
+
+To run the application inside an isolated Docker container:
+
+### Start Container in Background:
+```bash
+docker compose up -d
+```
+
+### View Live Logs:
+```bash
+docker compose logs -f
+```
+
+### Stop Container:
+```bash
+docker compose down
+```
+
+The web dashboard is automatically published at `http://localhost:8080`, and database records persist in the `./data` volume.
+
+---
+
+## 📊 5. Using the Web Dashboard
+
+Once started, open **[http://localhost:8080](http://localhost:8080)** in your browser:
+
+- **Language Toggle:** Click `🇱🇻 Latviešu` or `🇬🇧 English` in the top right to switch languages instantly.
+- **View Mode Switcher:**
+  - Click `[ 📄 Pagination ]` to browse fixed pages (25, 50, 100, 200 items per page).
+  - Click `[ ♾️ Infinite Scroll ]` to automatically load items as you scroll down.
+- **Sorting:** Click any column header (`Score`, `Title`, `Source`, `Price`, `Location`, `Last Seen`, etc.) to toggle ascending/descending order.
+- **Filtering:** Use the search bar, source selector, alert status, photo-only filter, and price bounds to narrow down results.
+- **Manual Scan Trigger:** Click `🔄 Sākt meklēšanu tagad` / `🔄 Trigger Scan Now` to trigger an immediate marketplace scrape in the background without restarting the process.
