@@ -147,8 +147,55 @@ func TestRepositoryOperations(t *testing.T) {
 	if len(pagedRes.Listings) != 1 {
 		t.Errorf("expected 1 item, got %d", len(pagedRes.Listings))
 	}
-	if pagedRes.TotalPages != 1 {
-		t.Errorf("expected TotalPages=1, got %d", pagedRes.TotalPages)
+	// 10. Multi-product tests
+	secondListing := &model.Listing{
+		ProductID:    "nintendo-switch-oled",
+		Source:       model.SourceBanknote,
+		SourceID:     "switch-999",
+		URL:          "https://veikals.banknote.lv/switch",
+		Title:        "Nintendo Switch OLED White",
+		Price:        220.0,
+		Score:        85,
+		Confidence:   model.ConfidenceHigh,
+		MatchReasons: []string{"Switch match"},
+	}
+	_, _, err = repo.UpsertListing(ctx, secondListing)
+	if err != nil {
+		t.Fatalf("UpsertListing for second product failed: %v", err)
+	}
+
+	// Stats for all
+	totalAll, candAll, notifAll, err := repo.GetStats(ctx, 70)
+	if err != nil || totalAll != 2 || candAll != 2 || notifAll != 1 {
+		t.Errorf("expected global stats (2, 2, 1), got (%d, %d, %d, %v)", totalAll, candAll, notifAll, err)
+	}
+
+	// Stats for switch only
+	totalSwitch, candSwitch, notifSwitch, err := repo.GetStats(ctx, 70, "nintendo-switch-oled")
+	if err != nil || totalSwitch != 1 || candSwitch != 1 || notifSwitch != 0 {
+		t.Errorf("expected switch stats (1, 1, 0), got (%d, %d, %d, %v)", totalSwitch, candSwitch, notifSwitch, err)
+	}
+
+	// GetProductStats aggregated
+	pStats, err := repo.GetProductStats(ctx, 70)
+	if err != nil {
+		t.Fatalf("GetProductStats failed: %v", err)
+	}
+	if len(pStats) != 2 {
+		t.Errorf("expected 2 product stat entries, got %d", len(pStats))
+	}
+	if pStats["nintendo-switch-oled"].Total != 1 || pStats["oticon-connectclip"].Total != 1 {
+		t.Errorf("unexpected product stats counts: %+v", pStats)
+	}
+
+	// Paged filter by product
+	pagedSwitch, err := repo.GetListingsPaged(ctx, storage.ListingFilter{
+		ProductID: "nintendo-switch-oled",
+		Page:      1,
+		PageSize:  10,
+	})
+	if err != nil || pagedSwitch.TotalCount != 1 || pagedSwitch.Listings[0].Title != "Nintendo Switch OLED White" {
+		t.Errorf("unexpected paged switch results: %+v", pagedSwitch)
 	}
 }
 

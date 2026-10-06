@@ -32,39 +32,45 @@ const (
 
 // Listing represents a normalized marketplace listing across all sources.
 type Listing struct {
-	ID            string          `json:"id"`
-	Source        Source          `json:"source"`
-	SourceID      string          `json:"source_id"`
-	URL           string          `json:"url"`
-	Title         string          `json:"title"`
-	Description   string          `json:"description"`
-	Price         float64         `json:"price"`
-	Currency      string          `json:"currency"`
-	ImageURLs     []string        `json:"image_urls"`
-	Location      string          `json:"location"`
-	Seller        string          `json:"seller"`
-	Score         int             `json:"score"`
-	Confidence    ConfidenceLevel `json:"confidence"`
-	MatchReasons  []string        `json:"match_reasons"`
-	FirstSeenAt   time.Time       `json:"first_seen_at"`
-	LastSeenAt    time.Time       `json:"last_seen_at"`
-	Notified      bool            `json:"notified"`
-	NotifiedAt    *time.Time      `json:"notified_at,omitempty"`
-	RawMetadata   map[string]any  `json:"raw_metadata,omitempty"`
+	ID           string          `json:"id"`
+	ProductID    string          `json:"product_id"`
+	Source       Source          `json:"source"`
+	SourceID     string          `json:"source_id"`
+	URL          string          `json:"url"`
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	Price        float64         `json:"price"`
+	Currency     string          `json:"currency"`
+	ImageURLs    []string        `json:"image_urls"`
+	Location     string          `json:"location"`
+	Seller       string          `json:"seller"`
+	Score        int             `json:"score"`
+	Confidence   ConfidenceLevel `json:"confidence"`
+	MatchReasons []string        `json:"match_reasons"`
+	FirstSeenAt  time.Time       `json:"first_seen_at"`
+	LastSeenAt   time.Time       `json:"last_seen_at"`
+	Notified     bool            `json:"notified"`
+	NotifiedAt   *time.Time      `json:"notified_at,omitempty"`
+	RawMetadata  map[string]any  `json:"raw_metadata,omitempty"`
 }
 
 // GenerateID produces a deterministic identifier for deduplication.
 // Prefers source:source_id when source_id is present, otherwise hashes normalized URL + Title.
 func (l *Listing) GenerateID() string {
+	prefix := ""
+	if l.ProductID != "" {
+		prefix = l.ProductID + ":"
+	}
+
 	if l.SourceID != "" {
-		return string(l.Source) + ":" + strings.TrimSpace(l.SourceID)
+		return prefix + string(l.Source) + ":" + strings.TrimSpace(l.SourceID)
 	}
 
 	normURL := strings.TrimSpace(strings.ToLower(l.URL))
 	normTitle := strings.TrimSpace(strings.ToLower(l.Title))
-	data := string(l.Source) + "|" + normURL + "|" + normTitle
+	data := prefix + string(l.Source) + "|" + normURL + "|" + normTitle
 	hash := sha256.Sum256([]byte(data))
-	return string(l.Source) + ":" + hex.EncodeToString(hash[:12])
+	return prefix + string(l.Source) + ":" + hex.EncodeToString(hash[:12])
 }
 
 // PrimaryImage returns the first available image URL or empty string.

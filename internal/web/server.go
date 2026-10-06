@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"connectclip-finder/internal/config"
 	"connectclip-finder/internal/model"
 	"connectclip-finder/internal/scheduler"
 	"connectclip-finder/internal/storage"
@@ -22,25 +24,49 @@ type Server struct {
 	sched         *scheduler.Scheduler
 	minAlertScore int
 	targetName    string
+	products      []config.ProductConfig
 	httpServer    *http.Server
 }
 
 // NewServer initializes the dashboard HTTP server.
-func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler, minAlertScore int, targetName ...string) *Server {
+// productsOrTargetName can be []config.ProductConfig, a string (target name), or omitted.
+func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler, minAlertScore int, productsOrTargetName ...any) *Server {
 	tName := "Oticon ConnectClip"
-	if len(targetName) > 0 && targetName[0] != "" {
-		tName = targetName[0]
+	var products []config.ProductConfig
+
+	for _, arg := range productsOrTargetName {
+		switch v := arg.(type) {
+		case []config.ProductConfig:
+			products = v
+		case config.ProductConfig:
+			products = append(products, v)
+		case string:
+			if v != "" {
+				tName = v
+			}
+		}
 	}
+
+	if len(products) == 0 {
+		products = config.DefaultProducts(&config.Config{
+			TargetName:    tName,
+			MinAlertScore: minAlertScore,
+		})
+	}
+
 	s := &Server{
 		addr:          addr,
 		repo:          repo,
 		sched:         sched,
 		minAlertScore: minAlertScore,
 		targetName:    tName,
+		products:      products,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleDashboard)
+	mux.HandleFunc("/records", s.handleDashboard)
+	mux.HandleFunc("/api/products", s.handleAPIProducts)
 	mux.HandleFunc("/api/listings", s.handleAPIListings)
 	mux.HandleFunc("/api/scan", s.handleAPITriggerScan)
 
@@ -68,34 +94,162 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
 
+// ProductCardData contains summary information displayed on the Welcome Screen grid.
+type ProductCardData struct {
+	ID             string
+	Name           string
+	Icon           string
+	Category       string
+	Description    string
+	Enabled        bool
+	SearchTerms    []string
+	MinPrice       float64
+	MaxPrice       float64
+	AlertThreshold int
+	TotalListings  int
+	Candidates     int
+	Notified       int
+	LastSeenAt     string
+}
+
+// welcomeGridData represents the template data for the Welcome Screen Grid.
+type welcomeGridData struct {
+	TotalProducts   int
+	TotalListings   int
+	TotalCandidates int
+	TotalNotified   int
+	Products        []ProductCardData
+	LastUpdated     string
+}
+
+// dashboardData represents the template data for the Product Records Page.
 type dashboardData struct {
-	TargetName    string
-	TotalListings int
-	Candidates    int
-	Notified      int
-	MinAlertScore int
-	Listings      []*model.Listing
-	Sources       []string
-	LastUpdated   string
-	Page          int
-	PageSize      int
-	TotalPages    int
-	MatchedCount  int
+	ProductID      string
+	TargetName     string
+	ProductIcon    string
+	Category       string
+	TargetMinPrice float64
+	TargetMaxPrice float64
+	TotalListings  int
+	Candidates     int
+	Notified       int
+	MinAlertScore  int
+	Listings       []*model.Listing
+	Sources        []string
+	LastUpdated    string
+	Page           int
+	PageSize       int
+	TotalPages     int
+	MatchedCount   int
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	if r.URL.Path != "/" && r.URL.Path != "/records" {
 		http.NotFound(w, r)
 		return
 	}
 
-	ctx := r.Context()
-	total, candidates, notified, err := s.repo.GetStats(ctx, s.minAlertScore)
-	if err != nil {
-		slog.Error("Failed to fetch dashboard stats", "error", err)
+	productID := strings.TrimSpace(r.URL.Query().Get("product"))
+	if productID == "" && r.URL.Path == "/" {
+		s.handleWelcomeScreen(w, r)
+		return
 	}
 
-	sources, _ := s.repo.GetAllSources(ctx)
+	s.handleRecordsScreen(w, r, productID)
+}
+
+func (s *Server) handleWelcomeScreen(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	pStats, _ := s.repo.GetProductStats(ctx, s.minAlertScore)
+
+	var cards []ProductCardData
+	var totalListings, totalCandidates, totalNotified int
+
+	for _, p := range s.products {
+		ps := pStats[p.ID]
+		lastSeen := "—"
+		if !ps.LastSeenAt.IsZero() {
+			lastSeen = ps.LastSeenAt.Format("15:04 02.01.2006")
+		}
+
+		cards = append(cards, ProductCardData{
+			ID:             p.ID,
+			Name:           p.Name,
+			Icon:           p.Icon,
+			Category:       p.Category,
+			Description:    p.Description,
+			Enabled:        p.Enabled,
+			SearchTerms:    p.SearchTerms,
+			MinPrice:       p.MinPrice,
+			MaxPrice:       p.MaxPrice,
+			AlertThreshold: p.AlertThreshold,
+			TotalListings:  ps.Total,
+			Candidates:     ps.Candidates,
+			Notified:       ps.Notified,
+			LastSeenAt:     lastSeen,
+		})
+
+		totalListings += ps.Total
+		totalCandidates += ps.Candidates
+		totalNotified += ps.Notified
+	}
+
+	data := welcomeGridData{
+		TotalProducts:   len(s.products),
+		TotalListings:   totalListings,
+		TotalCandidates: totalCandidates,
+		TotalNotified:   totalNotified,
+		Products:        cards,
+		LastUpdated:     time.Now().Format("15:04:05 02.01.2006"),
+	}
+
+	tmpl, err := template.New("welcome").Parse(welcomeHTML)
+	if err != nil {
+		slog.Error("Welcome template parse error", "error", err)
+		http.Error(w, "Internal Template Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = tmpl.Execute(w, data)
+}
+
+func (s *Server) handleRecordsScreen(w http.ResponseWriter, r *http.Request, productID string) {
+	ctx := r.Context()
+
+	var currProduct *config.ProductConfig
+	for i := range s.products {
+		if s.products[i].ID == productID {
+			currProduct = &s.products[i]
+			break
+		}
+	}
+	if currProduct == nil {
+		if len(s.products) > 0 {
+			currProduct = &s.products[0]
+			productID = currProduct.ID
+		} else {
+			currProduct = &config.ProductConfig{
+				ID:             "oticon-connectclip",
+				Name:           s.targetName,
+				Icon:           "🎧",
+				AlertThreshold: s.minAlertScore,
+			}
+			productID = "oticon-connectclip"
+		}
+	}
+
+	threshold := currProduct.AlertThreshold
+	if threshold <= 0 {
+		threshold = s.minAlertScore
+	}
+
+	total, candidates, notified, err := s.repo.GetStats(ctx, threshold, productID)
+	if err != nil {
+		slog.Error("Failed to fetch dashboard stats", "product_id", productID, "error", err)
+	}
+
+	sources, _ := s.repo.GetAllSources(ctx, productID)
 
 	page := 1
 	if p := r.URL.Query().Get("page"); p != "" {
@@ -112,6 +266,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := storage.ListingFilter{
+		ProductID: productID,
 		Query:     r.URL.Query().Get("q"),
 		Source:    r.URL.Query().Get("source"),
 		Status:    r.URL.Query().Get("status"),
@@ -139,18 +294,23 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := dashboardData{
-		TargetName:    s.targetName,
-		TotalListings: total,
-		Candidates:    candidates,
-		Notified:      notified,
-		MinAlertScore: s.minAlertScore,
-		Listings:      pagedResult.Listings,
-		Sources:       sources,
-		LastUpdated:   time.Now().Format("15:04:05 02.01.2006"),
-		Page:          pagedResult.Page,
-		PageSize:      pagedResult.PageSize,
-		TotalPages:    pagedResult.TotalPages,
-		MatchedCount:  pagedResult.TotalCount,
+		ProductID:      currProduct.ID,
+		TargetName:     currProduct.Name,
+		ProductIcon:    currProduct.Icon,
+		Category:       currProduct.Category,
+		TargetMinPrice: currProduct.MinPrice,
+		TargetMaxPrice: currProduct.MaxPrice,
+		TotalListings:  total,
+		Candidates:     candidates,
+		Notified:       notified,
+		MinAlertScore:  threshold,
+		Listings:       pagedResult.Listings,
+		Sources:        sources,
+		LastUpdated:    time.Now().Format("15:04:05 02.01.2006"),
+		Page:           pagedResult.Page,
+		PageSize:       pagedResult.PageSize,
+		TotalPages:     pagedResult.TotalPages,
+		MatchedCount:   pagedResult.TotalCount,
 	}
 
 	tmpl, err := template.New("dashboard").Parse(dashboardHTML)
@@ -164,9 +324,64 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = tmpl.Execute(w, data)
 }
 
+func (s *Server) handleAPIProducts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	pStats, _ := s.repo.GetProductStats(ctx, s.minAlertScore)
+
+	type productAPIItem struct {
+		ID             string   `json:"id"`
+		Name           string   `json:"name"`
+		Icon           string   `json:"icon"`
+		Category       string   `json:"category"`
+		Description    string   `json:"description"`
+		Enabled        bool     `json:"enabled"`
+		SearchTerms    []string `json:"search_terms"`
+		MinPrice       float64  `json:"min_price"`
+		MaxPrice       float64  `json:"max_price"`
+		AlertThreshold int      `json:"alert_threshold"`
+		Total          int      `json:"total"`
+		Candidates     int      `json:"candidates"`
+		Notified       int      `json:"notified"`
+		LastSeen       string   `json:"last_seen"`
+	}
+
+	items := make([]productAPIItem, 0, len(s.products))
+	for _, p := range s.products {
+		ps := pStats[p.ID]
+		lastSeenStr := ""
+		if !ps.LastSeenAt.IsZero() {
+			lastSeenStr = ps.LastSeenAt.Format(time.RFC3339)
+		}
+		items = append(items, productAPIItem{
+			ID:             p.ID,
+			Name:           p.Name,
+			Icon:           p.Icon,
+			Category:       p.Category,
+			Description:    p.Description,
+			Enabled:        p.Enabled,
+			SearchTerms:    p.SearchTerms,
+			MinPrice:       p.MinPrice,
+			MaxPrice:       p.MaxPrice,
+			AlertThreshold: p.AlertThreshold,
+			Total:          ps.Total,
+			Candidates:     ps.Candidates,
+			Notified:       ps.Notified,
+			LastSeen:       lastSeenStr,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(items)
+}
+
 func (s *Server) handleAPIListings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
+
+	productID := q.Get("product")
+	if productID == "" {
+		productID = q.Get("product_id")
+	}
 
 	// If no page/limit/paged requested (backward compatible with unmarshaling []*model.Listing in tests)
 	if q.Get("page") == "" && q.Get("paged") != "true" && q.Get("limit") == "" {
@@ -174,7 +389,7 @@ func (s *Server) handleAPIListings(w http.ResponseWriter, r *http.Request) {
 		if m := q.Get("min_score"); m != "" {
 			minScore, _ = strconv.Atoi(m)
 		}
-		listings, err := s.repo.GetAllListings(ctx, minScore)
+		listings, err := s.repo.GetAllListings(ctx, minScore, productID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -186,6 +401,7 @@ func (s *Server) handleAPIListings(w http.ResponseWriter, r *http.Request) {
 
 	// Paginated request
 	filter := storage.ListingFilter{
+		ProductID: productID,
 		Query:     q.Get("q"),
 		Source:    q.Get("source"),
 		Status:    q.Get("status"),
@@ -238,17 +454,649 @@ func (s *Server) handleAPITriggerScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		slog.Info("Manual scan triggered via Web UI")
-		_ = s.sched.RunOnce(context.Background())
-	}()
+	productID := r.URL.Query().Get("product")
+	if productID == "" {
+		productID = r.URL.Query().Get("product_id")
+	}
+
+	go func(pid string) {
+		if pid != "" {
+			slog.Info("Manual scan triggered for product via Web UI", "product_id", pid)
+			_ = s.sched.RunOnceForProduct(context.Background(), pid)
+		} else {
+			slog.Info("Manual scan triggered for all products via Web UI")
+			_ = s.sched.RunOnce(context.Background())
+		}
+	}(productID)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":  "scan_started",
-		"message": "Marketplace scan initiated in background.",
+		"status":     "scan_started",
+		"product_id": productID,
+		"message":    "Marketplace scan initiated in background.",
 	})
 }
+
+const welcomeHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marketplace Product Finder - Multi-Product Monitor</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --card-border: #334155;
+    --text: #f8fafc;
+    --text-muted: #94a3b8;
+    --primary: #38bdf8;
+    --primary-hover: #0284c7;
+    --high: #22c55e;
+    --medium: #f59e0b;
+    --low: #64748b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    padding: 24px 20px;
+  }
+  .container { max-width: 1440px; margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  h1 { font-size: 1.6rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 10px; }
+  .badge-app {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    background: #0284c7;
+    border-radius: 9999px;
+    font-weight: 600;
+  }
+  .actions { display: flex; gap: 12px; align-items: center; }
+  .btn {
+    background: var(--primary);
+    color: #0f172a;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.15s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+  }
+  .btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
+  .btn-sm { padding: 6px 12px; font-size: 0.82rem; }
+  .btn-secondary { background: var(--card-border); color: #fff; }
+  .btn-secondary:hover { background: #475569; }
+
+  /* Language Switcher */
+  .lang-switch {
+    display: inline-flex;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .lang-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+  }
+  .lang-btn.active { background: #0284c7; color: #fff; }
+  .lang-btn:hover:not(.active) { color: #fff; background: #1e293b; }
+
+  /* Global Stats Bar */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .stat-label { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-val { font-size: 1.8rem; font-weight: 700; color: #fff; }
+  .stat-val.high { color: var(--high); }
+  .stat-val.primary { color: var(--primary); }
+
+  /* Grid Toolbar */
+  .grid-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    padding: 14px 20px;
+    border-radius: 8px;
+  }
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 280px;
+    max-width: 420px;
+  }
+  .search-input {
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    color: #fff;
+    padding: 9px 14px 9px 36px;
+    border-radius: 6px;
+    width: 100%;
+    font-size: 0.9rem;
+  }
+  .search-input:focus { outline: 1px solid var(--primary); }
+  .search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    pointer-events: none;
+  }
+
+  /* Product Cards Grid */
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 24px;
+  }
+  .product-card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .product-card:hover {
+    transform: translateY(-3px);
+    border-color: #38bdf8;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  }
+  .card-header {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+  .card-icon {
+    font-size: 2.2rem;
+    width: 58px;
+    height: 58px;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-titles { flex: 1; min-width: 0; }
+  .card-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .badge-category {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    background: #334155;
+    border-radius: 9999px;
+    color: #cbd5e1;
+    font-weight: 500;
+  }
+  .badge-status {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .badge-status.active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+  .badge-status.paused {
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    background: #22c55e;
+    border-radius: 50%;
+    box-shadow: 0 0 6px #22c55e;
+  }
+  .card-desc {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+    margin-bottom: 16px;
+    min-height: 40px;
+  }
+  .card-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .pill {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    color: #cbd5e1;
+  }
+  .pill-price { color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); }
+  .pill-score { color: #4ade80; border-color: rgba(34, 197, 94, 0.3); }
+
+  .card-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 12px;
+    gap: 8px;
+    text-align: center;
+    margin-bottom: 14px;
+  }
+  .metric-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
+  .metric-val { font-size: 1.25rem; font-weight: 700; color: #fff; }
+  .metric-val.high { color: var(--high); }
+  .metric-val.primary { color: var(--primary); }
+
+  .card-last-seen {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .card-footer {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .btn-view {
+    flex: 1;
+    justify-content: center;
+    padding: 10px 16px;
+    font-size: 0.92rem;
+  }
+  .btn-scan-card {
+    padding: 10px 14px;
+    font-size: 0.88rem;
+  }
+
+  /* Toast Notification */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #1e293b;
+    border: 1px solid var(--primary);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    border-radius: 8px;
+    padding: 14px 20px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9rem;
+    z-index: 1000;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    transform: translateY(30px);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>🔎 <span data-i18n="app_title">Marketplace Product Finder</span> <span class="badge-app" data-i18n="app_badge">Multi-Product Monitor</span></h1>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;" data-i18n="welcome_sub">
+        Concurrent marketplace monitoring for Oticon ConnectClip, gaming consoles, electronics & more
+      </p>
+    </div>
+    <div class="actions">
+      <!-- Language Switcher -->
+      <div class="lang-switch">
+        <button id="welcome-lang-lv" class="lang-btn" onclick="setWelcomeLang('lv')">🇱🇻 Latviešu</button>
+        <button id="welcome-lang-en" class="lang-btn active" onclick="setWelcomeLang('en')">🇬🇧 English</button>
+      </div>
+
+      <button class="btn" id="btnScanAll" onclick="triggerAllScan(this)">
+        <span data-i18n="btn_scan_all">⚡ Scan All Products</span>
+      </button>
+      <a href="/" class="btn btn-secondary" data-i18n="btn_refresh">Refresh</a>
+    </div>
+  </header>
+
+  <!-- Global Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label" data-i18n="stat_monitored">Monitored Products</div>
+      <div class="stat-val primary">{{.TotalProducts}}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label" data-i18n="stat_total_listings">Total Tracked Listings</div>
+      <div class="stat-val">{{.TotalListings}}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label" data-i18n="stat_candidates">Match Candidates</div>
+      <div class="stat-val high">{{.TotalCandidates}}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label" data-i18n="stat_alerts">Alerts Dispatched</div>
+      <div class="stat-val">{{.TotalNotified}}</div>
+    </div>
+  </div>
+
+  <!-- Product Grid Toolbar -->
+  <div class="grid-toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="productSearchInput" class="search-input" data-i18n-placeholder="search_placeholder" placeholder="Filter products by name or category..." oninput="filterProducts()">
+    </div>
+    <div style="font-size: 0.85rem; color: var(--text-muted);">
+      <span id="productCounter">{{len .Products}}</span> <span data-i18n="products_count_suffix">products active</span>
+    </div>
+  </div>
+
+  <!-- Product Cards Grid -->
+  <div class="product-grid" id="productGrid">
+    {{range .Products}}
+      <div class="product-card" data-id="{{.ID}}" data-name="{{.Name}}" data-cat="{{.Category}}">
+        <div>
+          <div class="card-header">
+            <div class="card-icon">{{.Icon}}</div>
+            <div class="card-titles">
+              <div class="card-title" title="{{.Name}}">{{.Name}}</div>
+              <div class="card-badges">
+                {{if .Category}}<span class="badge-category">{{.Category}}</span>{{end}}
+                {{if .Enabled}}
+                  <span class="badge-status active"><span class="dot"></span> <span data-i18n="status_active">Active</span></span>
+                {{else}}
+                  <span class="badge-status paused"><span data-i18n="status_paused">Paused</span></span>
+                {{end}}
+              </div>
+            </div>
+          </div>
+
+          <div class="card-desc">{{.Description}}</div>
+
+          <div class="card-pills">
+            {{if gt .MinPrice 0.0}}
+              <div class="pill pill-price">
+                <span data-i18n="target_price">Target:</span> €{{printf "%.0f" .MinPrice}} – €{{printf "%.0f" .MaxPrice}}
+              </div>
+            {{end}}
+            <div class="pill pill-score">
+              <span data-i18n="score_thresh">Threshold:</span> &ge;{{.AlertThreshold}}%
+            </div>
+            <div class="pill">
+              {{len .SearchTerms}} <span data-i18n="search_terms_count">queries</span>
+            </div>
+          </div>
+
+          <div class="card-metrics">
+            <div>
+              <div class="metric-label" data-i18n="label_total">Total</div>
+              <div class="metric-val">{{.TotalListings}}</div>
+            </div>
+            <div>
+              <div class="metric-label" data-i18n="label_candidates">Candidates</div>
+              <div class="metric-val high">{{.Candidates}}</div>
+            </div>
+            <div>
+              <div class="metric-label" data-i18n="label_alerted">Alerted</div>
+              <div class="metric-val primary">{{.Notified}}</div>
+            </div>
+          </div>
+
+          <div class="card-last-seen">
+            <span data-i18n="last_seen">Last seen:</span>
+            <strong>{{.LastSeenAt}}</strong>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <a href="/?product={{.ID}}" class="btn btn-view" id="btn-records-{{.ID}}">
+            <span data-i18n="view_records">View Records →</span>
+          </a>
+          <button class="btn btn-secondary btn-scan-card" id="btn-scan-{{.ID}}" onclick="triggerProductScan('{{.ID}}', this)" title="Scan now">
+            <span data-i18n="scan_now">Scan Now ⚡</span>
+          </button>
+        </div>
+      </div>
+    {{else}}
+      <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--card); border: 1px solid var(--card-border); border-radius: 12px; color: var(--text-muted);" data-i18n="no_products">
+        No products configured. Check products.json.
+      </div>
+    {{end}}
+  </div>
+</div>
+
+<div id="toast" class="toast">
+  <span id="toastIcon">⚡</span>
+  <span id="toastMsg">Marketplace scan started in background!</span>
+</div>
+
+<script>
+const welcomeI18n = {
+  en: {
+    app_title: "Marketplace Product Finder",
+    app_badge: "Multi-Product Monitor",
+    welcome_sub: "Concurrent marketplace monitoring for Oticon ConnectClip, gaming consoles, electronics & more",
+    btn_scan_all: "⚡ Scan All Products",
+    btn_refresh: "Refresh",
+    stat_monitored: "Monitored Products",
+    stat_total_listings: "Total Tracked Listings",
+    stat_candidates: "Match Candidates",
+    stat_alerts: "Alerts Dispatched",
+    search_placeholder: "Filter products by name or category...",
+    products_count_suffix: "products active",
+    view_records: "View Records →",
+    scan_now: "Scan Now ⚡",
+    status_active: "Active",
+    status_paused: "Paused",
+    label_total: "Total",
+    label_candidates: "Candidates",
+    label_alerted: "Alerted",
+    last_seen: "Last seen:",
+    target_price: "Target:",
+    score_thresh: "Threshold:",
+    search_terms_count: "queries",
+    toast_all_started: "Scan started for all products in background!",
+    toast_single_started: "Scan started for selected product in background!",
+    no_products: "No products configured."
+  },
+  lv: {
+    app_title: "Tirgus Preču Meklētājs",
+    app_badge: "Vairāku Preču Monitors",
+    welcome_sub: "Vienlaicīga tirgus uzraudzība: Oticon ConnectClip, spēļu konsoles, tehnika un citas preces",
+    btn_scan_all: "⚡ Skenēt visus produktus",
+    btn_refresh: "Atjaunot",
+    stat_monitored: "Uzraudzītie produkti",
+    stat_total_listings: "Kopējie sludinājumi",
+    stat_candidates: "Atbilstošie kandidāti",
+    stat_alerts: "Nosūtītie paziņojumi",
+    search_placeholder: "Filtrēt produktus pēc nosaukuma vai kategorijas...",
+    products_count_suffix: "aktīvi produkti",
+    view_records: "Skatīt ierakstus →",
+    scan_now: "Skenēt tagad ⚡",
+    status_active: "Aktīvs",
+    status_paused: "Apturēts",
+    label_total: "Kopā",
+    label_candidates: "Kandidāti",
+    label_alerted: "Paziņoti",
+    last_seen: "Pēdējoreiz:",
+    target_price: "Mērķis:",
+    score_thresh: "Slieksnis:",
+    search_terms_count: "vaicājumi",
+    toast_all_started: "Visu produktu skenēšana palaista fonā!",
+    toast_single_started: "Izvēlētā produkta skenēšana palaista fonā!",
+    no_products: "Nav konfigurētu preču."
+  }
+};
+
+let currentLang = 'en';
+
+function setWelcomeLang(lang) {
+  if (!welcomeI18n[lang]) return;
+  currentLang = lang;
+
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = document.getElementById('welcome-lang-' + lang);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const dict = welcomeI18n[lang];
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key]) el.innerText = dict[key];
+  });
+
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (dict[key]) el.placeholder = dict[key];
+  });
+
+  try {
+    localStorage.setItem('cc_finder_lang', lang);
+  } catch (e) {}
+}
+
+function filterProducts() {
+  const query = (document.getElementById('productSearchInput').value || '').toLowerCase().trim();
+  const cards = document.querySelectorAll('.product-card');
+  let visible = 0;
+  cards.forEach(card => {
+    const name = (card.getAttribute('data-name') || '').toLowerCase();
+    const cat = (card.getAttribute('data-cat') || '').toLowerCase();
+    if (!query || name.includes(query) || cat.includes(query)) {
+      card.style.display = '';
+      visible++;
+    } else {
+      card.style.display = 'none';
+    }
+  });
+  const counter = document.getElementById('productCounter');
+  if (counter) counter.innerText = String(visible);
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  const msgEl = document.getElementById('toastMsg');
+  if (!toast || !msgEl) return;
+  msgEl.innerText = msg;
+  toast.classList.add('show');
+  setTimeout(() => { toast.classList.remove('show'); }, 4000);
+}
+
+function triggerAllScan(btn) {
+  if (btn) btn.disabled = true;
+  fetch('/api/scan', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      showToast(welcomeI18n[currentLang].toast_all_started);
+      setTimeout(() => { window.location.reload(); }, 6000);
+    })
+    .catch(err => {
+      alert('Error triggering scan: ' + err);
+      if (btn) btn.disabled = false;
+    });
+}
+
+function triggerProductScan(productID, btn) {
+  if (btn) btn.disabled = true;
+  fetch('/api/scan?product=' + encodeURIComponent(productID), { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      showToast(welcomeI18n[currentLang].toast_single_started);
+      setTimeout(() => { window.location.reload(); }, 6000);
+    })
+    .catch(err => {
+      alert('Error triggering product scan: ' + err);
+      if (btn) btn.disabled = false;
+    });
+}
+
+function initWelcome() {
+  try {
+    const savedLang = localStorage.getItem('cc_finder_lang');
+    if (savedLang === 'lv' || savedLang === 'en') {
+      currentLang = savedLang;
+    } else if (navigator.language && navigator.language.startsWith('lv')) {
+      currentLang = 'lv';
+    }
+  } catch (e) {}
+  setWelcomeLang(currentLang);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initWelcome);
+} else {
+  initWelcome();
+}
+</script>
+</body>
+</html>`;
 
 const dashboardHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -707,9 +1555,20 @@ const dashboardHTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+    <a href="/" class="btn btn-secondary btn-sm" id="btnBackToProducts" style="font-size: 0.85rem; padding: 6px 14px;">
+      <span>←</span> <span data-i18n="back_to_products">All Products</span>
+    </a>
+    <div style="display: flex; align-items: center; gap: 10px; font-size: 0.88rem; color: var(--text-muted);">
+      <span style="font-size: 1.3rem;">{{.ProductIcon}}</span>
+      <span style="font-weight: 700; color: #fff; font-size: 1rem;">{{.TargetName}}</span>
+      {{if .Category}}<span class="badge-oticon" style="font-size: 0.72rem; padding: 2px 8px;">{{.Category}}</span>{{end}}
+      {{if gt .TargetMinPrice 0.0}}<span style="color: var(--primary); font-weight: 600;">Target: €{{printf "%.0f" .TargetMinPrice}} – €{{printf "%.0f" .TargetMaxPrice}}</span>{{end}}
+    </div>
+  </div>
   <header>
     <div>
-      <h1>{{.TargetName}} Finder <span class="badge-oticon" data-i18n="badge_oticon">Marketplace Monitor</span></h1>
+      <h1><span>{{.ProductIcon}}</span> {{.TargetName}} Finder <span class="badge-oticon" data-i18n="badge_oticon">Marketplace Monitor</span></h1>
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;" id="subtitleText">Tracking Latvian marketplaces for {{.TargetName}} • Updated {{.LastUpdated}}</p>
     </div>
     <div class="actions">
@@ -720,7 +1579,7 @@ const dashboardHTML = `<!DOCTYPE html>
       </div>
 
       <button class="btn" id="btn-scan" onclick="triggerScan()"><span data-i18n="btn_scan">🔄 Trigger Scan Now</span></button>
-      <a href="/" class="btn btn-secondary" data-i18n="btn_refresh">Refresh</a>
+      <a href="/?product={{.ProductID}}" class="btn btn-secondary" data-i18n="btn_refresh">Refresh</a>
     </div>
   </header>
 
@@ -1037,7 +1896,9 @@ const i18n = {
     badge_no_img: "No img",
     tag_alerted: "🚨 Alerted",
     subtitle_prefix: "Tracking Latvian marketplaces for lost Oticon ConnectClip • Updated ",
-    alert_scan_started: "Scan initiated! The dashboard will auto-refresh in 8 seconds."
+    alert_scan_started: "Scan initiated! The dashboard will auto-refresh in 8 seconds.",
+    back_to_products: "All Products",
+    records_badge: "Records"
   },
   lv: {
     badge_oticon: "Oticon monitors",
@@ -1094,7 +1955,9 @@ const i18n = {
     badge_no_img: "Nav foto",
     tag_alerted: "🚨 Paziņots",
     subtitle_prefix: "Meklē nozaudēto Oticon ConnectClip Latvijas sludinājumu portālos • Atjaunots ",
-    alert_scan_started: "Meklēšana sākta! Lapa tiks atjaunota pēc 8 sekundēm."
+    alert_scan_started: "Meklēšana sākta! Lapa tiks atjaunota pēc 8 sekundēm.",
+    back_to_products: "Visi produkti",
+    records_badge: "Ieraksti"
   }
 };
 
@@ -1225,6 +2088,7 @@ function fetchPage(targetPage, appendRows) {
 
   const params = new URLSearchParams({
     paged: 'true',
+    product: '{{.ProductID}}',
     page: String(targetPage),
     limit: String(pageSize),
     sort: currentSortCol,
@@ -1624,7 +2488,7 @@ function triggerScan() {
   const btn = document.getElementById('btn-scan');
   btn.disabled = true;
   btn.innerText = i18n[currentLang].btn_scanning;
-  fetch('/api/scan', { method: 'POST' })
+  fetch('/api/scan?product=' + encodeURIComponent('{{.ProductID}}'), { method: 'POST' })
     .then(r => r.json())
     .then(data => {
       alert(i18n[currentLang].alert_scan_started);

@@ -28,9 +28,20 @@ type Result struct {
 	SourceStatuses []model.SourceStatus
 }
 
-// Execute runs all enabled source adapters across all search queries.
-// Failures in individual sources are recorded and isolated without stopping other sources.
+// Execute runs all enabled source adapters across all default search queries for the default product.
 func (e *Engine) Execute(ctx context.Context) *Result {
+	return e.ExecuteForProduct(ctx, "oticon-connectclip", e.searchTerms)
+}
+
+// ExecuteForProduct runs all enabled source adapters for a specific product and terms.
+func (e *Engine) ExecuteForProduct(ctx context.Context, productID string, terms []string) *Result {
+	if len(terms) == 0 {
+		terms = e.searchTerms
+	}
+	if productID == "" {
+		productID = "oticon-connectclip"
+	}
+
 	result := &Result{
 		Listings:       make([]*model.Listing, 0),
 		SourceStatuses: make([]model.SourceStatus, 0),
@@ -44,16 +55,16 @@ func (e *Engine) Execute(ctx context.Context) *Result {
 		}
 
 		sourceName := adapter.Name()
-		slog.Info("Starting scrape for source", "source", sourceName)
+		slog.Info("Starting scrape for source", "source", sourceName, "product_id", productID)
 		start := time.Now()
 
 		var sourceListings []*model.Listing
 		var lastErr error
 
-		for i, term := range e.searchTerms {
+		for i, term := range terms {
 			select {
 			case <-ctx.Done():
-				slog.Warn("Scrape interrupted by context cancellation", "source", sourceName)
+				slog.Warn("Scrape interrupted by context cancellation", "source", sourceName, "product_id", productID)
 				return result
 			default:
 			}
@@ -67,6 +78,7 @@ func (e *Engine) Execute(ctx context.Context) *Result {
 			if err != nil {
 				slog.Warn("Query error on source adapter",
 					"source", sourceName,
+					"product_id", productID,
 					"query", term,
 					"error", err,
 				)
@@ -75,6 +87,7 @@ func (e *Engine) Execute(ctx context.Context) *Result {
 			}
 
 			for _, item := range items {
+				item.ProductID = productID
 				id := item.GenerateID()
 				item.ID = id
 				if !seenIDs[id] {
@@ -98,6 +111,7 @@ func (e *Engine) Execute(ctx context.Context) *Result {
 
 		slog.Info("Completed source scrape",
 			"source", sourceName,
+			"product_id", productID,
 			"listings_found", len(sourceListings),
 			"duration", duration.Round(time.Millisecond),
 		)

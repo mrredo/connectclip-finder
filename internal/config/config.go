@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
@@ -47,7 +48,7 @@ type Config struct {
 	HTTPEnabled bool
 	HTTPAddr    string
 
-	// Target item configuration
+	// Target item configuration (legacy/fallback)
 	TargetName           string
 	TargetMinPrice       float64
 	TargetMaxPrice       float64
@@ -58,6 +59,28 @@ type Config struct {
 
 	// Search queries to use
 	SearchTerms []string
+
+	// Multi-product configurations
+	ProductsPath string
+	Products     []ProductConfig
+}
+
+// ProductConfig defines target product search terms, scoring rules, and metadata.
+type ProductConfig struct {
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Icon                 string   `json:"icon"`
+	Category             string   `json:"category"`
+	Description          string   `json:"description"`
+	Enabled              bool     `json:"enabled"`
+	SearchTerms          []string `json:"search_terms"`
+	MinPrice             float64  `json:"min_price"`
+	MaxPrice             float64  `json:"max_price"`
+	AlertThreshold       int      `json:"alert_threshold"`
+	MatchExactKeywords   []string `json:"exact_keywords"`
+	MatchContextKeywords []string `json:"context_keywords"`
+	MatchModelNumbers    []string `json:"model_numbers"`
+	MatchExcludeKeywords []string `json:"exclude_keywords"`
 }
 
 // Load loads configuration from environment variables and an optional .env file.
@@ -82,6 +105,8 @@ func Load(envPath string) (*Config, error) {
 	if len(terms) == 0 {
 		terms = DefaultSearchTerms()
 	}
+
+	productsPath := getEnv("PRODUCTS_PATH", "products.json")
 
 	cfg := &Config{
 		ScanInterval:         scanInterval,
@@ -115,9 +140,118 @@ func Load(envPath string) (*Config, error) {
 		MatchModelNumbers:    getEnvSlice("MATCH_MODEL_NUMBERS"),
 		MatchExcludeKeywords: getEnvSlice("MATCH_EXCLUDE_KEYWORDS"),
 		SearchTerms:          terms,
+		ProductsPath:         productsPath,
 	}
 
+	cfg.Products = cfg.LoadProducts()
+
 	return cfg, nil
+}
+
+// LoadProducts loads products from products.json or initializes defaults.
+func (c *Config) LoadProducts() []ProductConfig {
+	if c.ProductsPath != "" {
+		if data, err := os.ReadFile(c.ProductsPath); err == nil && len(data) > 0 {
+			var products []ProductConfig
+			if err := json.Unmarshal(data, &products); err == nil && len(products) > 0 {
+				for i := range products {
+					if products[i].AlertThreshold <= 0 {
+						products[i].AlertThreshold = c.MinAlertScore
+					}
+					if products[i].Icon == "" {
+						products[i].Icon = "📦"
+					}
+				}
+				return products
+			}
+		}
+	}
+
+	// Fallback to default product list
+	defaults := DefaultProducts(c)
+
+	// Save default template if file does not exist
+	if c.ProductsPath != "" {
+		if _, err := os.Stat(c.ProductsPath); os.IsNotExist(err) {
+			if data, err := json.MarshalIndent(defaults, "", "  "); err == nil {
+				_ = os.WriteFile(c.ProductsPath, data, 0644)
+			}
+		}
+	}
+
+	return defaults
+}
+
+// GetProduct returns the product configuration with the given ID.
+func (c *Config) GetProduct(id string) *ProductConfig {
+	for i := range c.Products {
+		if c.Products[i].ID == id {
+			return &c.Products[i]
+		}
+	}
+	return nil
+}
+
+// DefaultProducts returns preconfigured products.
+func DefaultProducts(cfg *Config) []ProductConfig {
+	return []ProductConfig{
+		{
+			ID:                   "oticon-connectclip",
+			Name:                 cfg.TargetName,
+			Icon:                 "🎧",
+			Category:             "Audio / Hearing",
+			Description:          "Wireless hearing aid microphone and Bluetooth audio streamer",
+			Enabled:              true,
+			SearchTerms:          cfg.SearchTerms,
+			MinPrice:             cfg.TargetMinPrice,
+			MaxPrice:             cfg.TargetMaxPrice,
+			AlertThreshold:       cfg.MinAlertScore,
+			MatchExactKeywords:   cfg.MatchExactKeywords,
+			MatchContextKeywords: cfg.MatchContextKeywords,
+			MatchModelNumbers:    cfg.MatchModelNumbers,
+			MatchExcludeKeywords: cfg.MatchExcludeKeywords,
+		},
+		{
+			ID:                   "nintendo-switch-oled",
+			Name:                 "Nintendo Switch OLED",
+			Icon:                 "🎮",
+			Category:             "Gaming",
+			Description:          "Nintendo Switch OLED model console and accessories",
+			Enabled:              true,
+			SearchTerms: []string{
+				"Nintendo Switch OLED",
+				"Switch OLED",
+				"Nintendo OLED",
+			},
+			MinPrice:             150,
+			MaxPrice:             320,
+			AlertThreshold:       70,
+			MatchExactKeywords:   []string{"switch oled", "nintendo oled"},
+			MatchContextKeywords: []string{"nintendo", "switch", "oled", "konsole", "console"},
+			MatchModelNumbers:    []string{"heg-001"},
+			MatchExcludeKeywords: []string{"switch lite", "v1", "v2", "spēle", "game only"},
+		},
+		{
+			ID:                   "airpods-pro-2",
+			Name:                 "Apple AirPods Pro 2",
+			Icon:                 "🎵",
+			Category:             "Audio / Electronics",
+			Description:          "Apple AirPods Pro 2nd Generation with MagSafe / USB-C",
+			Enabled:              true,
+			SearchTerms: []string{
+				"AirPods Pro 2",
+				"AirPods Pro 2nd",
+				"AirPods Pro USB-C",
+			},
+			MinPrice:             100,
+			MaxPrice:             230,
+			AlertThreshold:       70,
+			MatchExactKeywords:   []string{"airpods pro 2", "airpods pro 2nd"},
+			MatchContextKeywords: []string{"apple", "airpods", "pro", "austiņas", "magsafe", "usb-c"},
+			MatchModelNumbers:    []string{"a2968", "a3047", "a3048", "mqd83"},
+			MatchExcludeKeywords: []string{"case only", "tikai kastīte", "kopija", "replica"},
+		},
+	}
 }
 
 // DefaultSearchTerms returns the curated list of queries.

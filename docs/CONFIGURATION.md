@@ -26,9 +26,76 @@ This document describes all environment variables used by **ConnectClip Finder**
 
 ---
 
-## 2. Target Product Configuration (Universal Monitoring)
+## 2. Multi-Product Monitoring (`products.json`) 🚀
 
-By default, the finder is configured to look for the **Oticon ConnectClip** hearing aid accessory. You can monitor **any other item** by setting these variables:
+The application supports monitoring **multiple independent products simultaneously**. By default, it loads product targets from `products.json`.
+
+```json
+[
+  {
+    "id": "oticon-connectclip",
+    "name": "Oticon ConnectClip",
+    "icon": "🎧",
+    "category": "Audio / Hearing",
+    "description": "Wireless hearing aid microphone and Bluetooth audio streamer",
+    "enabled": true,
+    "search_terms": [
+      "Oticon ConnectClip",
+      "ConnectClip",
+      "Connect Clip",
+      "178509"
+    ],
+    "min_price": 30,
+    "max_price": 200,
+    "alert_threshold": 70,
+    "exact_keywords": ["connectclip", "connect clip"],
+    "context_keywords": ["oticon", "streamer", "mikrofons", "bluetooth"],
+    "model_numbers": ["178509"],
+    "exclude_keywords": ["remote control 3.0", "edumic", "tv adapter 3.0"]
+  },
+  {
+    "id": "nintendo-switch-oled",
+    "name": "Nintendo Switch OLED",
+    "icon": "🎮",
+    "category": "Gaming",
+    "description": "Nintendo Switch OLED model console and accessories",
+    "enabled": true,
+    "search_terms": ["Nintendo Switch OLED", "Switch OLED"],
+    "min_price": 150,
+    "max_price": 320,
+    "alert_threshold": 70,
+    "exact_keywords": ["switch oled", "nintendo oled"],
+    "context_keywords": ["nintendo", "switch", "oled", "konsole"],
+    "model_numbers": ["heg-001"],
+    "exclude_keywords": ["switch lite", "v1", "v2", "spēle"]
+  }
+]
+```
+
+### Product Fields Reference:
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `id` | string | Unique alphanumeric slug (e.g. `oticon-connectclip`, `airpods-pro-2`). |
+| `name` | string | Display title shown on welcome cards, records view, and Telegram alerts. |
+| `icon` | string | Emoji or icon displayed on the dashboard card (e.g. `🎧`, `🎮`, `🎵`, `📱`). |
+| `category` | string | Category label (e.g. `Audio / Hearing`, `Gaming`, `Electronics`). |
+| `description` | string | Brief description displayed on the welcome grid card. |
+| `enabled` | boolean | Set `true` to actively scrape and monitor this product, `false` to pause. |
+| `search_terms` | array | Specific search queries submitted to marketplace search bars for this item. |
+| `min_price` | number | Minimum target price in EUR (gives +15% score bonus when within range). |
+| `max_price` | number | Maximum target price in EUR. |
+| `alert_threshold`| number | Minimum score (0–100) needed to trigger Telegram alert for this product (default: `70`). |
+| `exact_keywords` | array | Key phrases indicating an exact match (+85% score). |
+| `context_keywords`| array | Supporting phrases indicating high relevance (+20% score each). |
+| `model_numbers` | array | Part numbers or model codes (+75% score). |
+| `exclude_keywords`| array | Negative keywords that incur score penalty (-50% each) to filter accessories or wrong models. |
+
+---
+
+### Legacy Single-Product Configuration (`.env`)
+
+For backwards compatibility, if `products.json` is not present, the finder falls back to single-product settings in `.env`:
 
 | Variable | Type | Example / Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -40,8 +107,6 @@ By default, the finder is configured to look for the **Oticon ConnectClip** hear
 | `MATCH_CONTEXT_KEYWORDS` | comma-separated | `mikrofons, dzirdes aparats, streamer` | Supporting keywords that boost confidence (+20% each). |
 | `MATCH_MODEL_NUMBERS` | comma-separated | `178509, AC1A, 2ACAHAC01` | Specific part numbers, model codes, or article IDs (+75% score). |
 | `MATCH_EXCLUDE_KEYWORDS` | comma-separated | `ladetajs, charger, tv adapter` | Negative keywords that incur a penalty (-50% each) to filter out accessories or wrong models. |
-
-> **Note:** If `MATCH_EXACT_KEYWORDS`, `MATCH_MODEL_NUMBERS`, and `MATCH_CONTEXT_KEYWORDS` are omitted, the engine automatically uses handcrafted rules for **Oticon ConnectClip**.
 
 ---
 

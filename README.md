@@ -1,24 +1,29 @@
 # ConnectClip Finder 🔍
 
-An automated, reliable marketplace monitoring daemon designed to find a lost **Oticon ConnectClip** hearing-aid accessory or **any other target product** on Latvian second-hand marketplaces.
+An automated, reliable multi-product marketplace monitoring daemon designed to find a lost **Oticon ConnectClip** hearing-aid accessory or **track multiple target products simultaneously** (e.g. Nintendo Switch OLED, AirPods Pro, laptops, power tools) across Latvian second-hand marketplaces.
 
 ---
 
 ## 📚 Documentation
 
 - [🚀 **Quick Start Guide**](docs/QUICKSTART.md) — Fast-track setup, running binary or Docker, CLI modes, and dashboard walkthrough.
-- [⚙️ **Configuration Guide (`.env`)**](docs/CONFIGURATION.md) — Detailed explanation of all environment variables, Telegram setup, cookie export tips, and custom product examples (Nintendo Switch, AirPods, etc.).
+- [⚙️ **Configuration Guide (`products.json` & `.env`)**](docs/CONFIGURATION.md) — Detailed guide for multi-product JSON definitions, environment variables, Telegram alerts, and session cookies.
 - [🧠 **Developer Docs & Architecture**](docs/ARCHITECTURE.md) — System internals, data flow, deterministic matching engine, SQLite WAL layer, and step-by-step tutorial for adding new marketplaces.
 
 ---
 
-## 🎯 Target Product Specifications
+## 🎯 Multi-Product Tracking & Welcome Screen
 
-- **Product:** Oticon ConnectClip (AC1A)
-- **Primary Function:** 2.4 GHz Bluetooth streamer, wireless microphone, remote control, and hands-free headset for Oticon wireless hearing aids (Opn, More, Real, Intent, etc.).
-- **Part / Article Number:** `178509` (also packaging variants: `180424`, `180425`)
-- **FCC ID:** `2ACAHAC01`
-- **Retail Price:** ~€300 new, typically €40 - €150 second-hand.
+ConnectClip Finder supports monitoring **multiple independent products simultaneously** using `products.json`:
+
+1. **Welcome Screen Grid (`GET /`):** A responsive grid displaying cards for each configured product with live statistics (Total Listings, Candidate Matches, Active Alerts, Price Range, and Last Seen).
+2. **Product Records Dashboard (`GET /?product=<id>`):** Dedicated tabular view for each product featuring column sorting, server-side pagination, infinite scroll, multi-criteria filtering, and bilingual support (🇱🇻 / 🇬🇧).
+3. **Scoped Scraping & Alerts:** Each product maintains its own keywords, search queries, price boundaries, and scoring rules. Scrapes can run globally across all products or scoped to a specific target.
+
+Pre-configured in `products.json`:
+- **Oticon ConnectClip (`oticon-connectclip`):** 2.4 GHz Bluetooth streamer, part numbers `178509`, `AC1A`, `2ACAHAC01`.
+- **Nintendo Switch OLED (`nintendo-switch-oled`):** Handheld gaming console, model `HEG-001`.
+- **AirPods Pro 2 (`airpods-pro-2`):** Wireless noise-cancelling earbuds, models `A2698`, `A2699`, `A2700`.
 
 ---
 
@@ -170,14 +175,21 @@ docker compose logs -f
 
 ConnectClip Finder includes an integrated HTTP web server designed for instant access without any login or authentication required:
 
-- **URL:** [http://localhost:8080](http://localhost:8080) (customizable via `HTTP_ADDR` or `-http :PORT`)
-- **Key Features:**
-  - **Live Listings Table:** Displays all tracked items with thumbnail images, match score badges (`HIGH`, `MED`, `LOW`), prices in EUR, locations, and matched signal tags.
-  - **Zero Authentication:** Open dashboard, just visit the URL in any browser.
-  - **Instant Filtering:** Real-time client-side search input for filtering by title, source, or location, and quick score threshold filter buttons (All, $\ge 50\%$, Candidates $\ge 70\%$).
-  - **Manual Trigger Button:** Click "🔄 Trigger Scan Now" to immediately trigger a background marketplace scrape cycle on demand.
-  - **JSON API:** Fetch structured data at `GET /api/listings` or filter candidates with `GET /api/listings?min_score=70`.
-  - **Serve-Only Mode:** Inspect database findings without scheduling scrapes using `go run ./cmd/finder -serve-only`.
+- **Welcome Screen (Product Grid):** [http://localhost:8080/](http://localhost:8080/)
+  - Displays all monitored targets defined in `products.json`.
+  - Shows real-time statistics cards: total listings, candidate matches, active alerts, price range, and last seen timestamp.
+  - One-click navigation into any product's records.
+- **Product Records Dashboard:** [http://localhost:8080/?product=oticon-connectclip](http://localhost:8080/?product=oticon-connectclip)
+  - **Live Listings Table:** Displays tracked items with thumbnail images, match score badges (`HIGH`, `MED`, `LOW`), prices in EUR, locations, and matched signal tags.
+  - **Sorting & Filtering:** Sort by any column (Score, Title, Price, Source, Date) and filter by search text, source, minimum score, and photo availability.
+  - **Pagination & Infinite Scroll:** Switch between fixed-size pages (25, 50, 100, 200) and smooth infinite scrolling.
+  - **Bilingual Interface:** Instant language toggle between `🇱🇻 Latviešu` and `🇬🇧 English`.
+  - **Manual Trigger Button:** Click "🔄 Trigger Scan Now" to immediately trigger a background scrape cycle for the selected product.
+- **JSON REST API:**
+  - `GET /api/products`: List all configured products with their live statistics.
+  - `GET /api/listings?product=<id>`: Fetch filtered, paginated listing records.
+  - `POST /api/scan?product=<id>`: Trigger an asynchronous scrape job.
+- **Serve-Only Mode:** Inspect database findings without scheduling scrapes using `go run ./cmd/finder -serve-only`.
 
 
 ---

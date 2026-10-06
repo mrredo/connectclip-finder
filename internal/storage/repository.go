@@ -27,6 +27,9 @@ func (r *Repository) UpsertListing(ctx context.Context, listing *model.Listing) 
 	if listing.ID == "" {
 		listing.ID = listing.GenerateID()
 	}
+	if listing.ProductID == "" {
+		listing.ProductID = "oticon-connectclip"
+	}
 
 	imagesJSON, _ := json.Marshal(listing.ImageURLs)
 	reasonsJSON, _ := json.Marshal(listing.MatchReasons)
@@ -46,13 +49,14 @@ func (r *Repository) UpsertListing(ctx context.Context, listing *model.Listing) 
 
 		insertQuery := `
 		INSERT INTO listings (
-			id, source, source_id, url, title, description, price, currency,
+			id, product_id, source, source_id, url, title, description, price, currency,
 			image_urls, location, seller, score, confidence, match_reasons,
 			first_seen_at, last_seen_at, notified, notified_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		_, err := r.db.ExecContext(ctx, insertQuery,
 			listing.ID,
+			listing.ProductID,
 			string(listing.Source),
 			listing.SourceID,
 			listing.URL,
@@ -129,16 +133,24 @@ func (r *Repository) UpsertListing(ctx context.Context, listing *model.Listing) 
 }
 
 // GetUnnotifiedCandidates fetches listings with score >= minScore that have not yet been notified.
-func (r *Repository) GetUnnotifiedCandidates(ctx context.Context, minScore int) ([]*model.Listing, error) {
-	query := `
-	SELECT id, source, source_id, url, title, description, price, currency,
+// Optionally filters by productID if provided.
+func (r *Repository) GetUnnotifiedCandidates(ctx context.Context, minScore int, productID ...string) ([]*model.Listing, error) {
+	whereSQL := "WHERE notified = 0 AND score >= ?"
+	args := []any{minScore}
+	if len(productID) > 0 && productID[0] != "" {
+		whereSQL += " AND product_id = ?"
+		args = append(args, productID[0])
+	}
+
+	query := fmt.Sprintf(`
+	SELECT id, product_id, source, source_id, url, title, description, price, currency,
 	       image_urls, location, seller, score, confidence, match_reasons,
 	       first_seen_at, last_seen_at, notified, notified_at
 	FROM listings
-	WHERE notified = 0 AND score >= ?
-	ORDER BY score DESC, first_seen_at DESC`
+	%s
+	ORDER BY score DESC, first_seen_at DESC`, whereSQL)
 
-	rows, err := r.db.QueryContext(ctx, query, minScore)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query unnotified candidates: %w", err)
 	}
@@ -152,6 +164,7 @@ func (r *Repository) GetUnnotifiedCandidates(ctx context.Context, minScore int) 
 
 		err := rows.Scan(
 			&l.ID,
+			&l.ProductID,
 			&sourceStr,
 			&l.SourceID,
 			&l.URL,
@@ -226,17 +239,24 @@ func (r *Repository) RecordScanRun(ctx context.Context, report *model.ScanReport
 	return nil
 }
 
-// GetAllListings returns all stored listings with optional score filter, ordered by score DESC, last_seen_at DESC.
-func (r *Repository) GetAllListings(ctx context.Context, minScore int) ([]*model.Listing, error) {
-	query := `
-	SELECT id, source, source_id, url, title, description, price, currency,
+// GetAllListings returns all stored listings with optional score filter and optional productID filter.
+func (r *Repository) GetAllListings(ctx context.Context, minScore int, productID ...string) ([]*model.Listing, error) {
+	whereSQL := "WHERE score >= ?"
+	args := []any{minScore}
+	if len(productID) > 0 && productID[0] != "" {
+		whereSQL += " AND product_id = ?"
+		args = append(args, productID[0])
+	}
+
+	query := fmt.Sprintf(`
+	SELECT id, product_id, source, source_id, url, title, description, price, currency,
 	       image_urls, location, seller, score, confidence, match_reasons,
 	       first_seen_at, last_seen_at, notified, notified_at
 	FROM listings
-	WHERE score >= ?
-	ORDER BY score DESC, last_seen_at DESC`
+	%s
+	ORDER BY score DESC, last_seen_at DESC`, whereSQL)
 
-	rows, err := r.db.QueryContext(ctx, query, minScore)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all listings: %w", err)
 	}
@@ -250,6 +270,7 @@ func (r *Repository) GetAllListings(ctx context.Context, minScore int) ([]*model
 
 		err := rows.Scan(
 			&l.ID,
+			&l.ProductID,
 			&sourceStr,
 			&l.SourceID,
 			&l.URL,
@@ -287,25 +308,103 @@ func (r *Repository) GetAllListings(ctx context.Context, minScore int) ([]*model
 	return result, rows.Err()
 }
 
-// GetStats returns summary counts for the dashboard.
-func (r *Repository) GetStats(ctx context.Context, minAlertScore int) (total int, candidates int, notified int, err error) {
-	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings`).Scan(&total)
+// ProductStat holds summary metrics for a specific product.
+type ProductStat struct {
+	ProductID  string    `json:"product_id"`
+	Total      int       `json:"total"`
+	Candidates int       `json:"candidates"`
+	Notified   int       `json:"notified"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+// GetStats returns summary counts for the dashboard. If productID is provided, stats are scoped to that product.
+func (r *Repository) GetStats(ctx context.Context, minAlertScore int, productID ...string) (total int, candidates int, notified int, err error) {
+	var whereClause, whereCand, whereNotif string
+	var args, candArgs, notifArgs []any
+
+	if len(productID) > 0 && productID[0] != "" {
+		whereClause = "WHERE product_id = ?"
+		args = []any{productID[0]}
+		whereCand = "WHERE score >= ? AND product_id = ?"
+		candArgs = []any{minAlertScore, productID[0]}
+		whereNotif = "WHERE notified = 1 AND product_id = ?"
+		notifArgs = []any{productID[0]}
+	} else {
+		whereClause = ""
+		args = nil
+		whereCand = "WHERE score >= ?"
+		candArgs = []any{minAlertScore}
+		whereNotif = "WHERE notified = 1"
+		notifArgs = nil
+	}
+
+	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings `+whereClause, args...).Scan(&total)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings WHERE score >= ?`, minAlertScore).Scan(&candidates)
+	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings `+whereCand, candArgs...).Scan(&candidates)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings WHERE notified = 1`).Scan(&notified)
+	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings `+whereNotif, notifArgs...).Scan(&notified)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	return total, candidates, notified, nil
 }
 
+// GetProductStats returns statistics grouped by product_id.
+func (r *Repository) GetProductStats(ctx context.Context, minAlertScore int) (map[string]ProductStat, error) {
+	query := `
+	SELECT 
+		product_id,
+		COUNT(*) as total,
+		COUNT(CASE WHEN score >= ? THEN 1 END) as candidates,
+		COUNT(CASE WHEN notified = 1 THEN 1 END) as notified,
+		MAX(last_seen_at) as last_seen
+	FROM listings
+	GROUP BY product_id`
+
+	rows, err := r.db.QueryContext(ctx, query, minAlertScore)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query product stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]ProductStat)
+	for rows.Next() {
+		var ps ProductStat
+		var lastSeenRaw any
+		if err := rows.Scan(&ps.ProductID, &ps.Total, &ps.Candidates, &ps.Notified, &lastSeenRaw); err != nil {
+			return nil, fmt.Errorf("failed to scan product stat: %w", err)
+		}
+		if lastSeenRaw != nil {
+			switch v := lastSeenRaw.(type) {
+			case time.Time:
+				ps.LastSeenAt = v
+			case string:
+				for _, layout := range []string{
+					time.RFC3339Nano,
+					time.RFC3339,
+					"2006-01-02 15:04:05.999999999-07:00",
+					"2006-01-02 15:04:05-07:00",
+					"2006-01-02 15:04:05",
+				} {
+					if t, err := time.Parse(layout, v); err == nil {
+						ps.LastSeenAt = t
+						break
+					}
+				}
+			}
+		}
+		stats[ps.ProductID] = ps
+	}
+	return stats, rows.Err()
+}
+
 // ListingFilter specifies filter and pagination parameters.
 type ListingFilter struct {
+	ProductID string
 	Query     string
 	Source    string
 	Status    string // "alerted" or "unalerted"
@@ -334,6 +433,10 @@ func (r *Repository) GetListingsPaged(ctx context.Context, f ListingFilter) (*Li
 	var whereClauses []string
 	var args []any
 
+	if f.ProductID != "" {
+		whereClauses = append(whereClauses, "product_id = ?")
+		args = append(args, f.ProductID)
+	}
 	if f.MinScore > 0 {
 		whereClauses = append(whereClauses, "score >= ?")
 		args = append(args, f.MinScore)
@@ -424,7 +527,7 @@ func (r *Repository) GetListingsPaged(ctx context.Context, f ListingFilter) (*Li
 	}
 
 	querySQL := fmt.Sprintf(`
-	SELECT id, source, source_id, url, title, description, price, currency,
+	SELECT id, product_id, source, source_id, url, title, description, price, currency,
 	       image_urls, location, seller, score, confidence, match_reasons,
 	       first_seen_at, last_seen_at, notified, notified_at
 	FROM listings
@@ -449,6 +552,7 @@ func (r *Repository) GetListingsPaged(ctx context.Context, f ListingFilter) (*Li
 
 		err := rows.Scan(
 			&l.ID,
+			&l.ProductID,
 			&sourceStr,
 			&l.SourceID,
 			&l.URL,
@@ -492,9 +596,16 @@ func (r *Repository) GetListingsPaged(ctx context.Context, f ListingFilter) (*Li
 	}, rows.Err()
 }
 
-// GetAllSources returns a list of distinct sources in alphabetical order.
-func (r *Repository) GetAllSources(ctx context.Context) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT source FROM listings WHERE source != '' ORDER BY source ASC`)
+// GetAllSources returns a list of distinct sources in alphabetical order, optionally scoped by productID.
+func (r *Repository) GetAllSources(ctx context.Context, productID ...string) ([]string, error) {
+	whereSQL := "WHERE source != ''"
+	var args []any
+	if len(productID) > 0 && productID[0] != "" {
+		whereSQL += " AND product_id = ?"
+		args = append(args, productID[0])
+	}
+
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf("SELECT DISTINCT source FROM listings %s ORDER BY source ASC", whereSQL), args...)
 	if err != nil {
 		return nil, err
 	}

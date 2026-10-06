@@ -43,7 +43,7 @@ go run ./cmd/finder
 Open your browser and navigate to:
 👉 **[http://localhost:8080](http://localhost:8080)**
 
-You will immediately see the bilingual web dashboard displaying tracked items!
+You will immediately see the **Product Selection Welcome Screen Grid** displaying all configured products (Oticon ConnectClip, Nintendo Switch OLED, AirPods Pro 2) along with live statistics! Click on any product card to open its dedicated listing records dashboard.
 
 ---
 
@@ -114,10 +114,17 @@ The web dashboard is automatically published at `http://localhost:8080`, and dat
 
 Once started, open **[http://localhost:8080](http://localhost:8080)** in your browser:
 
+### 🏠 Welcome Screen (`/`)
+- **Product Cards Grid:** Displays all target products monitored from `products.json`.
+- **Live Overview:** Each card shows Total Listings, Candidate Matches ($\ge 70\%$), Active Alerts, Price Range, and Last Seen date.
+- **Direct Navigation:** Click anywhere on a product card or click **"Atvērt ierakstus →" / "Open Records →"** to access that product's dashboard.
+
+### 📋 Product Records Dashboard (`/?product=<id>`)
+- **Breadcrumb Navigation:** Click **"← Visi produkti" / "← All Products"** to return to the welcome grid at any time.
 - **Language Toggle:** Click `🇱🇻 Latviešu` or `🇬🇧 English` in the top right to switch languages instantly.
 - **View Mode Switcher:**
   - Click `[ 📄 Pagination ]` to browse fixed pages (25, 50, 100, 200 items per page).
   - Click `[ ♾️ Infinite Scroll ]` to automatically load items as you scroll down.
-- **Sorting:** Click any column header (`Score`, `Title`, `Source`, `Price`, `Location`, `Last Seen`, etc.) to toggle ascending/descending order.
+- **Sorting:** Click any column header (`Score`, `Title`, `Source`, `Price`, `Location`, `Last Seen`) to toggle ascending/descending order.
 - **Filtering:** Use the search bar, source selector, alert status, photo-only filter, and price bounds to narrow down results.
-- **Manual Scan Trigger:** Click `🔄 Sākt meklēšanu tagad` / `🔄 Trigger Scan Now` to trigger an immediate marketplace scrape in the background without restarting the process.
+- **Manual Scan Trigger:** Click `🔄 Sākt meklēšanu tagad` / `🔄 Trigger Scan Now` to trigger an immediate scrape in the background for this product.

@@ -48,8 +48,8 @@ func TestDashboardServer(t *testing.T) {
 
 	server := NewServer(":0", repo, nil, 70)
 
-	// Test 1: GET / (Dashboard HTML with sorting & filters)
-	t.Run("GET / HTML Dashboard with Sorting and Filters", func(t *testing.T) {
+	// Test 1: GET / (Welcome Screen Grid)
+	t.Run("GET / HTML Welcome Screen Grid", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
@@ -60,8 +60,40 @@ func TestDashboardServer(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if !strings.Contains(body, "ConnectClip Finder") {
-			t.Errorf("HTML dashboard missing title header")
+		if !strings.Contains(body, "Marketplace Product Finder") {
+			t.Errorf("Welcome screen missing header")
+		}
+		if !strings.Contains(body, "Oticon ConnectClip") {
+			t.Errorf("Welcome screen missing Oticon ConnectClip card")
+		}
+		if !strings.Contains(body, "Nintendo Switch OLED") {
+			t.Errorf("Welcome screen missing Nintendo Switch OLED card")
+		}
+		if !strings.Contains(body, `id="productGrid"`) {
+			t.Errorf("Welcome screen missing product grid container")
+		}
+		if !strings.Contains(body, `id="btn-records-oticon-connectclip"`) {
+			t.Errorf("Welcome screen missing records button for oticon-connectclip")
+		}
+	})
+
+	// Test 1b: GET /?product=oticon-connectclip (Product Records Dashboard)
+	t.Run("GET /?product=oticon-connectclip HTML Dashboard with Sorting and Filters", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?product=oticon-connectclip", nil)
+		rec := httptest.NewRecorder()
+
+		server.httpServer.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200, got %d", rec.Code)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "Oticon ConnectClip") {
+			t.Errorf("HTML dashboard missing product title")
+		}
+		if !strings.Contains(body, "btnBackToProducts") {
+			t.Errorf("HTML dashboard missing breadcrumb back button")
 		}
 		if !strings.Contains(body, "Oticon ConnectClip labā stāvoklī") {
 			t.Errorf("HTML dashboard missing seeded listing title")
@@ -101,7 +133,6 @@ func TestDashboardServer(t *testing.T) {
 			`id="btnLoadMore"`,
 			`data-i18n="view_pagination"`,
 			`data-i18n="view_infinite"`,
-			`data-i18n="`,
 		}
 		for _, el := range filterElements {
 			if !strings.Contains(body, el) {
@@ -120,6 +151,26 @@ func TestDashboardServer(t *testing.T) {
 			if !strings.Contains(body, attr) {
 				t.Errorf("HTML row missing data attribute: %s", attr)
 			}
+		}
+	})
+
+	// Test 1c: GET /api/products
+	t.Run("GET /api/products JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/products", nil)
+		rec := httptest.NewRecorder()
+
+		server.httpServer.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200, got %d", rec.Code)
+		}
+
+		var prods []map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &prods); err != nil {
+			t.Fatalf("Failed to unmarshal /api/products JSON: %v", err)
+		}
+		if len(prods) < 2 {
+			t.Fatalf("Expected at least 2 products, got %d", len(prods))
 		}
 	})
 

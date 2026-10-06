@@ -150,6 +150,7 @@ func main() {
 		repo,
 		telegram,
 	)
+	sched.SetProducts(cfg.Products)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -171,7 +172,7 @@ func main() {
 		if *httpAddrFlag != "" {
 			addr = *httpAddrFlag
 		}
-		webServer = web.NewServer(addr, repo, sched, cfg.MinAlertScore, cfg.TargetName)
+		webServer = web.NewServer(addr, repo, sched, cfg.MinAlertScore, cfg.Products)
 		go func() {
 			if err := webServer.Start(); err != nil {
 				slog.Error("Web dashboard server stopped", "error", err)

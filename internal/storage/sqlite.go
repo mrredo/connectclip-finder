@@ -65,6 +65,7 @@ func (db *DB) migrate(ctx context.Context) error {
 		score INTEGER,
 		confidence TEXT,
 		match_reasons TEXT,
+		product_id TEXT NOT NULL DEFAULT 'oticon-connectclip',
 		first_seen_at DATETIME NOT NULL,
 		last_seen_at DATETIME NOT NULL,
 		notified BOOLEAN DEFAULT 0,
@@ -100,6 +101,13 @@ func (db *DB) migrate(ctx context.Context) error {
 		details_json TEXT
 	);
 	`
-	_, err := db.ExecContext(ctx, schema)
-	return err
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+
+	// For existing databases without product_id column, add it safely
+	_, _ = db.ExecContext(ctx, "ALTER TABLE listings ADD COLUMN product_id TEXT NOT NULL DEFAULT 'oticon-connectclip'")
+	_, _ = db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_listings_product ON listings(product_id)")
+
+	return nil
 }

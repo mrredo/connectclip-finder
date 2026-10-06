@@ -1,0 +1,119 @@
+[
+  {
+    "id": "oticon-connectclip",
+    "name": "Oticon ConnectClip",
+    "icon": "🎧",
+    "category": "Audio / Hearing",
+    "description": "Wireless hearing aid microphone and Bluetooth audio streamer",
+    "enabled": true,
+    "search_terms": [
+      "Oticon ConnectClip",
+      "ConnectClip",
+      "Connect Clip",
+      "Oticon dzirdes",
+      "Oticon mikrofons",
+      "Oticon Bluetooth",
+      "Oticon streamer",
+      "178509"
+    ],
+    "min_price": 30,
+    "max_price": 200,
+    "alert_threshold": 70,
+    "exact_keywords": [
+      "connectclip",
+      "connect clip"
+    ],
+    "context_keywords": [
+      "oticon",
+      "streamer",
+      "mikrofons",
+      "bluetooth",
+      "dzirdes"
+    ],
+    "model_numbers": [
+      "178509"
+    ],
+    "exclude_keywords": [
+      "remote control 3.0",
+      "edumic",
+      "tv adapter 3.0"
+    ]
+  },
+  {
+    "id": "nintendo-switch-oled",
+    "name": "Nintendo Switch OLED",
+    "icon": "🎮",
+    "category": "Gaming",
+    "description": "Nintendo Switch OLED model console and accessories",
+    "enabled": true,
+    "search_terms": [
+      "Nintendo Switch OLED",
+      "Switch OLED",
+      "Nintendo OLED"
+    ],
+    "min_price": 150,
+    "max_price": 320,
+    "alert_threshold": 70,
+    "exact_keywords": [
+      "switch oled",
+      "nintendo oled"
+    ],
+    "context_keywords": [
+      "nintendo",
+      "switch",
+      "oled",
+      "konsole",
+      "console"
+    ],
+    "model_numbers": [
+      "heg-001"
+    ],
+    "exclude_keywords": [
+      "switch lite",
+      "v1",
+      "v2",
+      "spēle",
+      "game only"
+    ]
+  },
+  {
+    "id": "airpods-pro-2",
+    "name": "Apple AirPods Pro 2",
+    "icon": "🎵",
+    "category": "Audio / Electronics",
+    "description": "Apple AirPods Pro 2nd Generation with MagSafe / USB-C",
+    "enabled": true,
+    "search_terms": [
+      "AirPods Pro 2",
+      "AirPods Pro 2nd",
+      "AirPods Pro USB-C"
+    ],
+    "min_price": 100,
+    "max_price": 230,
+    "alert_threshold": 70,
+    "exact_keywords": [
+      "airpods pro 2",
+      "airpods pro 2nd"
+    ],
+    "context_keywords": [
+      "apple",
+      "airpods",
+      "pro",
+      "austiņas",
+      "magsafe",
+      "usb-c"
+    ],
+    "model_numbers": [
+      "a2968",
+      "a3047",
+      "a3048",
+      "mqd83"
+    ],
+    "exclude_keywords": [
+      "case only",
+      "tikai kastīte",
+      "kopija",
+      "replica"
+    ]
+  }
+]
