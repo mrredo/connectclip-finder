@@ -231,6 +231,35 @@ const dashboardHTML = `<!DOCTYPE html>
   .btn-secondary { background: var(--card-border); color: #fff; }
   .btn-secondary:hover { background: #475569; }
 
+  /* Language Switcher */
+  .lang-switch {
+    display: inline-flex;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .lang-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+  }
+  .lang-btn.active {
+    background: #0284c7;
+    color: #fff;
+  }
+  .lang-btn:hover:not(.active) {
+    color: #fff;
+    background: #1e293b;
+  }
+
   /* Stats Grid */
   .stats-grid {
     display: grid;
@@ -478,30 +507,36 @@ const dashboardHTML = `<!DOCTYPE html>
 <div class="container">
   <header>
     <div>
-      <h1>ConnectClip Finder <span class="badge-oticon">Oticon Monitor</span></h1>
-      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">Tracking Latvian marketplaces for lost Oticon ConnectClip • Updated {{.LastUpdated}}</p>
+      <h1>ConnectClip Finder <span class="badge-oticon" data-i18n="badge_oticon">Oticon Monitor</span></h1>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;" id="subtitleText">Tracking Latvian marketplaces for lost Oticon ConnectClip • Updated {{.LastUpdated}}</p>
     </div>
     <div class="actions">
-      <button class="btn" id="btn-scan" onclick="triggerScan()">🔄 Trigger Scan Now</button>
-      <a href="/" class="btn btn-secondary">Refresh</a>
+      <!-- Language Switcher -->
+      <div class="lang-switch">
+        <button id="lang-btn-lv" class="lang-btn" onclick="setLanguage('lv')">🇱🇻 Latviešu</button>
+        <button id="lang-btn-en" class="lang-btn active" onclick="setLanguage('en')">🇬🇧 English</button>
+      </div>
+
+      <button class="btn" id="btn-scan" onclick="triggerScan()"><span data-i18n="btn_scan">🔄 Trigger Scan Now</span></button>
+      <a href="/" class="btn btn-secondary" data-i18n="btn_refresh">Refresh</a>
     </div>
   </header>
 
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-label">Total Listings Tracked</div>
+      <div class="stat-label" data-i18n="stat_total">Total Listings Tracked</div>
       <div class="stat-val">{{.TotalListings}}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Promising Candidates (&ge;{{.MinAlertScore}}%)</div>
+      <div class="stat-label" data-i18n="stat_candidates">Promising Candidates (&ge;{{.MinAlertScore}}%)</div>
       <div class="stat-val high">{{.Candidates}}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Telegram Alerts Dispatched</div>
+      <div class="stat-label" data-i18n="stat_notified">Telegram Alerts Dispatched</div>
       <div class="stat-val">{{.Notified}}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Alert Threshold</div>
+      <div class="stat-label" data-i18n="stat_threshold">Alert Threshold</div>
       <div class="stat-val">{{.MinAlertScore}}%</div>
     </div>
   </div>
@@ -511,13 +546,13 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="controls-row">
       <div class="search-wrap">
         <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" class="search-input" placeholder="Search title, description, location, signals..." onkeyup="applyFilters()">
+        <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="search_placeholder" placeholder="Search title, description, location, signals..." onkeyup="applyFilters()">
       </div>
 
       <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <!-- Marketplace Source Filter -->
         <select id="sourceFilter" class="filter-select" onchange="applyFilters()">
-          <option value="">All Marketplaces</option>
+          <option value="" data-i18n="source_all">All Marketplaces</option>
           {{range .Sources}}
             <option value="{{.}}">{{.}}</option>
           {{end}}
@@ -525,27 +560,27 @@ const dashboardHTML = `<!DOCTYPE html>
 
         <!-- Status Filter -->
         <select id="statusFilter" class="filter-select" onchange="applyFilters()">
-          <option value="">All Alert Statuses</option>
-          <option value="alerted">🚨 Alerted Only</option>
-          <option value="unalerted">Not Yet Alerted</option>
+          <option value="" data-i18n="status_all">All Alert Statuses</option>
+          <option value="alerted" data-i18n="status_alerted">🚨 Alerted Only</option>
+          <option value="unalerted" data-i18n="status_unalerted">Not Yet Alerted</option>
         </select>
 
         <!-- Price Range -->
         <div class="price-inputs">
-          <span>Price:</span>
-          <input type="number" id="minPrice" class="num-input" placeholder="Min €" min="0" oninput="onPriceInput()">
+          <span data-i18n="label_price">Price:</span>
+          <input type="number" id="minPrice" class="num-input" data-i18n-placeholder="price_min" placeholder="Min €" min="0" oninput="onPriceInput()">
           <span>–</span>
-          <input type="number" id="maxPrice" class="num-input" placeholder="Max €" min="0" oninput="onPriceInput()">
+          <input type="number" id="maxPrice" class="num-input" data-i18n-placeholder="price_max" placeholder="Max €" min="0" oninput="onPriceInput()">
         </div>
 
         <!-- Photos Only Checkbox -->
         <label class="checkbox-label">
           <input type="checkbox" id="photoFilter" onchange="applyFilters()">
-          <span>📷 With photo</span>
+          <span data-i18n="label_with_photo">📷 With photo</span>
         </label>
 
         <!-- Reset Button -->
-        <button class="btn btn-secondary btn-sm" onclick="resetFilters()">✕ Clear</button>
+        <button class="btn btn-secondary btn-sm" onclick="resetFilters()" data-i18n="btn_clear">✕ Clear</button>
       </div>
     </div>
 
@@ -553,25 +588,25 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="controls-row">
       <!-- Score Presets -->
       <div class="filter-group">
-        <span>Score:</span>
-        <button id="scoreBtnAll" class="filter-btn score-btn active" onclick="setScorePreset('all', this)">All</button>
-        <button id="scoreBtnCandidates" class="filter-btn score-btn" onclick="setScorePreset('candidates', this)">Candidates (&ge;{{.MinAlertScore}}%)</button>
-        <button id="scoreBtnMed" class="filter-btn score-btn" onclick="setScorePreset('med', this)">Medium+ (&ge;50%)</button>
-        <button id="scoreBtnHigh" class="filter-btn score-btn" onclick="setScorePreset('high', this)">High (&ge;75%)</button>
-        <button id="scoreBtnLow" class="filter-btn score-btn" onclick="setScorePreset('low', this)">Low (&lt;50%)</button>
+        <span data-i18n="label_score">Score:</span>
+        <button id="scoreBtnAll" class="filter-btn score-btn active" onclick="setScorePreset('all', this)" data-i18n="score_all">All</button>
+        <button id="scoreBtnCandidates" class="filter-btn score-btn" onclick="setScorePreset('candidates', this)" data-i18n="score_candidates">Candidates (&ge;{{.MinAlertScore}}%)</button>
+        <button id="scoreBtnMed" class="filter-btn score-btn" onclick="setScorePreset('med', this)" data-i18n="score_med">Medium+ (&ge;50%)</button>
+        <button id="scoreBtnHigh" class="filter-btn score-btn" onclick="setScorePreset('high', this)" data-i18n="score_high">High (&ge;75%)</button>
+        <button id="scoreBtnLow" class="filter-btn score-btn" onclick="setScorePreset('low', this)" data-i18n="score_low">Low (&lt;50%)</button>
       </div>
 
       <!-- Price Presets -->
       <div class="filter-group">
-        <span>Price Range:</span>
-        <button id="priceBtnAll" class="filter-btn price-btn active" onclick="setPricePreset('all', this)">All</button>
-        <button id="priceBtnUnder50" class="filter-btn price-btn" onclick="setPricePreset('under50', this)">&lt; €50</button>
-        <button id="priceBtnTarget" class="filter-btn price-btn" onclick="setPricePreset('50to150', this)">€50 – €150 (Target)</button>
-        <button id="priceBtnOver150" class="filter-btn price-btn" onclick="setPricePreset('over150', this)">&gt; €150</button>
+        <span data-i18n="label_price_range">Price Range:</span>
+        <button id="priceBtnAll" class="filter-btn price-btn active" onclick="setPricePreset('all', this)" data-i18n="price_all">All</button>
+        <button id="priceBtnUnder50" class="filter-btn price-btn" onclick="setPricePreset('under50', this)" data-i18n="price_under50">&lt; €50</button>
+        <button id="priceBtnTarget" class="filter-btn price-btn" onclick="setPricePreset('50to150', this)" data-i18n="price_target">€50 – €150 (Target)</button>
+        <button id="priceBtnOver150" class="filter-btn price-btn" onclick="setPricePreset('over150', this)" data-i18n="price_over150">&gt; €150</button>
       </div>
 
       <!-- Live Counter -->
-      <div class="result-counter">
+      <div class="result-counter" id="visibleCounterWrapper">
         Showing <strong id="visibleCount">{{len .Listings}}</strong> of {{len .Listings}} listings
       </div>
     </div>
@@ -581,30 +616,30 @@ const dashboardHTML = `<!DOCTYPE html>
     <table id="listingsTable">
       <thead>
         <tr>
-          <th style="width: 58px;">Photo</th>
-          <th class="sortable active" data-col="score" onclick="handleSort('score', this)" title="Click to sort by match score">
-            Score <span class="sort-icon">▼</span>
+          <th style="width: 58px;" data-i18n="th_photo">Photo</th>
+          <th class="sortable active" data-col="score" onclick="handleSort('score', this)" title="Click to sort">
+            <span data-i18n="th_score">Score</span> <span class="sort-icon">▼</span>
           </th>
-          <th class="sortable" data-col="title" onclick="handleSort('title', this)" title="Click to sort alphabetically by title">
-            Title & Details <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="title" onclick="handleSort('title', this)" title="Click to sort">
+            <span data-i18n="th_title">Title & Details</span> <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="source" onclick="handleSort('source', this)" title="Click to sort by marketplace source">
-            Source <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="source" onclick="handleSort('source', this)" title="Click to sort">
+            <span data-i18n="th_source">Source</span> <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="price" onclick="handleSort('price', this)" title="Click to sort by price">
-            Price <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="price" onclick="handleSort('price', this)" title="Click to sort">
+            <span data-i18n="th_price">Price</span> <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="location" onclick="handleSort('location', this)" title="Click to sort by location">
-            Location <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="location" onclick="handleSort('location', this)" title="Click to sort">
+            <span data-i18n="th_location">Location</span> <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="signals" onclick="handleSort('signals', this)" title="Click to sort by signal count">
-            Signals <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="signals" onclick="handleSort('signals', this)" title="Click to sort">
+            <span data-i18n="th_signals">Signals</span> <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="time" onclick="handleSort('time', this)" title="Click to sort chronologically">
-            Last Seen <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="time" onclick="handleSort('time', this)" title="Click to sort">
+            <span data-i18n="th_time">Last Seen</span> <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="status" onclick="handleSort('status', this)" title="Click to sort by notification status">
-            Status <span class="sort-icon">↕</span>
+          <th class="sortable" data-col="status" onclick="handleSort('status', this)" title="Click to sort">
+            <span data-i18n="th_status">Status</span> <span class="sort-icon">↕</span>
           </th>
         </tr>
       </thead>
@@ -624,7 +659,7 @@ const dashboardHTML = `<!DOCTYPE html>
             {{if .PrimaryImage}}
               <img src="{{.PrimaryImage}}" alt="" class="thumb" onerror="this.style.display='none'">
             {{else}}
-              <div class="no-img">No img</div>
+              <div class="no-img" data-i18n="badge_no_img">No img</div>
             {{end}}
           </td>
           <td>
@@ -663,7 +698,7 @@ const dashboardHTML = `<!DOCTYPE html>
           <td class="time-cell">{{.LastSeenAt.Format "02.01 15:04"}}</td>
           <td>
             {{if .Notified}}
-              <span class="notified-tag">🚨 Alerted</span>
+              <span class="notified-tag" data-i18n="tag_alerted">🚨 Alerted</span>
             {{else}}
               <span style="color: var(--text-muted); font-size: 0.75rem;">—</span>
             {{end}}
@@ -673,14 +708,14 @@ const dashboardHTML = `<!DOCTYPE html>
 
         <tr id="noResultsRow" style="display: none;">
           <td colspan="9" style="text-align: center; padding: 48px 20px; color: var(--text-muted);">
-            <div style="font-size: 1.05rem; margin-bottom: 10px;">🔍 No listings match the current filters</div>
-            <button class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset All Filters</button>
+            <div style="font-size: 1.05rem; margin-bottom: 10px;" data-i18n="no_results_title">🔍 No listings match the current filters</div>
+            <button class="btn btn-secondary btn-sm" onclick="resetFilters()" data-i18n="no_results_btn">Reset All Filters</button>
           </td>
         </tr>
 
         {{if eq (len .Listings) 0}}
         <tr>
-          <td colspan="9" style="text-align: center; padding: 48px 20px; color: var(--text-muted);">
+          <td colspan="9" style="text-align: center; padding: 48px 20px; color: var(--text-muted);" data-i18n="empty_listings">
             No listings tracked yet. Click "Trigger Scan Now" to run an initial marketplace scan.
           </td>
         </tr>
@@ -691,20 +726,177 @@ const dashboardHTML = `<!DOCTYPE html>
 </div>
 
 <script>
+const minAlertThreshold = {{.MinAlertScore}};
+const lastUpdatedTime = "{{.LastUpdated}}";
+const totalListingCount = {{len .Listings}};
+
+// -------------------------------------------------------------
+// Translations (English & Latvian)
+// -------------------------------------------------------------
+const i18n = {
+  en: {
+    badge_oticon: "Oticon Monitor",
+    btn_scan: "🔄 Trigger Scan Now",
+    btn_scanning: "⏳ Scanning...",
+    btn_refresh: "Refresh",
+    stat_total: "Total Listings Tracked",
+    stat_candidates: "Promising Candidates (≥" + minAlertThreshold + "%)",
+    stat_notified: "Telegram Alerts Dispatched",
+    stat_threshold: "Alert Threshold",
+    search_placeholder: "Search title, description, location, signals...",
+    source_all: "All Marketplaces",
+    status_all: "All Alert Statuses",
+    status_alerted: "🚨 Alerted Only",
+    status_unalerted: "Not Yet Alerted",
+    label_price: "Price:",
+    price_min: "Min €",
+    price_max: "Max €",
+    label_with_photo: "📷 With photo",
+    btn_clear: "✕ Clear",
+    label_score: "Score:",
+    score_all: "All",
+    score_candidates: "Candidates (≥" + minAlertThreshold + "%)",
+    score_med: "Medium+ (≥50%)",
+    score_high: "High (≥75%)",
+    score_low: "Low (<50%)",
+    label_price_range: "Price Range:",
+    price_all: "All",
+    price_under50: "< €50",
+    price_target: "€50 – €150 (Target)",
+    price_over150: "> €150",
+    th_photo: "Photo",
+    th_score: "Score",
+    th_title: "Title & Details",
+    th_source: "Source",
+    th_price: "Price",
+    th_location: "Location",
+    th_signals: "Signals",
+    th_time: "Last Seen",
+    th_status: "Status",
+    no_results_title: "🔍 No listings match the current filters",
+    no_results_btn: "Reset All Filters",
+    empty_listings: "No listings tracked yet. Click \"Trigger Scan Now\" to run an initial marketplace scan.",
+    badge_no_img: "No img",
+    tag_alerted: "🚨 Alerted",
+    subtitle_prefix: "Tracking Latvian marketplaces for lost Oticon ConnectClip • Updated ",
+    alert_scan_started: "Scan initiated! The dashboard will auto-refresh in 8 seconds."
+  },
+  lv: {
+    badge_oticon: "Oticon monitors",
+    btn_scan: "🔄 Sākt meklēšanu tagad",
+    btn_scanning: "⏳ Notiek meklēšana...",
+    btn_refresh: "Atjaunot",
+    stat_total: "Kopā atrasti sludinājumi",
+    stat_candidates: "Iespējamie kandidāti (≥" + minAlertThreshold + "%)",
+    stat_notified: "Nosūtītie Telegram paziņojumi",
+    stat_threshold: "Paziņojumu slieksnis",
+    search_placeholder: "Meklēt pēc nosaukuma, apraksta, vietas, pazīmēm...",
+    source_all: "Visi portāli",
+    status_all: "Visi paziņojumu statusi",
+    status_alerted: "🚨 Tikai paziņotie",
+    status_unalerted: "Nav paziņots",
+    label_price: "Cena:",
+    price_min: "No €",
+    price_max: "Līdz €",
+    label_with_photo: "📷 Tikai ar foto",
+    btn_clear: "✕ Notīrīt",
+    label_score: "Atbilstība:",
+    score_all: "Visi",
+    score_candidates: "Kandidāti (≥" + minAlertThreshold + "%)",
+    score_med: "Vidēja+ (≥50%)",
+    score_high: "Augsta (≥75%)",
+    score_low: "Zema (<50%)",
+    label_price_range: "Cenas diapazons:",
+    price_all: "Visas",
+    price_under50: "< 50 €",
+    price_target: "50 – 150 € (Mērķis)",
+    price_over150: "> 150 €",
+    th_photo: "Foto",
+    th_score: "Atbilstība",
+    th_title: "Nosaukums un apraksts",
+    th_source: "Portāls",
+    th_price: "Cena",
+    th_location: "Atrašanās vieta",
+    th_signals: "Pazīmes",
+    th_time: "Pēdējo reizi redzēts",
+    th_status: "Statuss",
+    no_results_title: "🔍 Neviens sludinājums neatbilst atlasītajiem filtriem",
+    no_results_btn: "Atiestatīt visus filtrus",
+    empty_listings: "Pagaidām nav atrasts neviens sludinājums. Nospiediet \"Sākt meklēšanu tagad\", lai veiktu meklēšanu.",
+    badge_no_img: "Nav foto",
+    tag_alerted: "🚨 Paziņots",
+    subtitle_prefix: "Meklē nozaudēto Oticon ConnectClip Latvijas sludinājumu portālos • Atjaunots ",
+    alert_scan_started: "Meklēšana sākta! Lapa tiks atjaunota pēc 8 sekundēm."
+  }
+};
+
+let currentLang = 'en';
+
+function setLanguage(lang) {
+  if (!i18n[lang]) return;
+  currentLang = lang;
+
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = document.getElementById('lang-btn-' + lang);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const dict = i18n[lang];
+
+  // Update elements with data-i18n
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key]) {
+      el.innerText = dict[key];
+    }
+  });
+
+  // Update elements with data-i18n-placeholder
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (dict[key]) {
+      el.placeholder = dict[key];
+    }
+  });
+
+  // Subtitle
+  const subEl = document.getElementById('subtitleText');
+  if (subEl) {
+    subEl.innerText = dict.subtitle_prefix + lastUpdatedTime;
+  }
+
+  // Update score badges in table
+  document.querySelectorAll('.score-badge').forEach(badge => {
+    const isHigh = badge.classList.contains('score-high');
+    const isMed = badge.classList.contains('score-medium');
+    const scoreVal = badge.innerText.split('%')[0] + '%';
+    if (lang === 'lv') {
+      badge.innerText = scoreVal + (isHigh ? ' AUGSTA' : isMed ? ' VIDĒJA' : ' ZEMA');
+    } else {
+      badge.innerText = scoreVal + (isHigh ? ' HIGH' : isMed ? ' MED' : ' LOW');
+    }
+  });
+
+  applyFilters();
+
+  try {
+    localStorage.setItem('cc_finder_lang', lang);
+  } catch (e) {}
+}
+
 function triggerScan() {
   const btn = document.getElementById('btn-scan');
   btn.disabled = true;
-  btn.innerText = '⏳ Scanning...';
+  btn.innerText = i18n[currentLang].btn_scanning;
   fetch('/api/scan', { method: 'POST' })
     .then(r => r.json())
     .then(data => {
-      alert('Scan initiated! The dashboard will auto-refresh in 8 seconds.');
+      alert(i18n[currentLang].alert_scan_started);
       setTimeout(() => { window.location.reload(); }, 8000);
     })
     .catch(e => {
       alert('Scan error: ' + e);
       btn.disabled = false;
-      btn.innerText = '🔄 Trigger Scan Now';
+      btn.innerText = i18n[currentLang].btn_scan;
     });
 }
 
@@ -719,7 +911,6 @@ function handleSort(col, headerEl) {
     currentSortDir = (currentSortDir === 'desc') ? 'asc' : 'desc';
   } else {
     currentSortCol = col;
-    // Default descending for numeric/time/status, ascending for text
     if (col === 'title' || col === 'source' || col === 'location') {
       currentSortDir = 'asc';
     } else {
@@ -727,7 +918,6 @@ function handleSort(col, headerEl) {
     }
   }
 
-  // Update header classes & indicators
   document.querySelectorAll('th.sortable').forEach(th => {
     th.classList.remove('active');
     const icon = th.querySelector('.sort-icon');
@@ -752,14 +942,12 @@ function sortRows() {
     const valA = a.dataset[currentSortCol] || '';
     const valB = b.dataset[currentSortCol] || '';
 
-    // Numeric sorting
     if (['score', 'price', 'signals', 'time', 'status'].includes(currentSortCol)) {
       const numA = parseFloat(valA) || 0;
       const numB = parseFloat(valB) || 0;
       return currentSortDir === 'asc' ? numA - numB : numB - numA;
     }
 
-    // String sorting
     const comp = valA.localeCompare(valB, undefined, { sensitivity: 'base', numeric: true });
     return currentSortDir === 'asc' ? comp : -comp;
   });
@@ -775,7 +963,6 @@ function sortRows() {
 // Extended Filtering
 // -------------------------------------------------------------
 let currentScorePreset = 'all';
-const minAlertThreshold = {{.MinAlertScore}};
 
 function setScorePreset(preset, btn) {
   currentScorePreset = preset;
@@ -808,7 +995,6 @@ function setPricePreset(preset, btn) {
 }
 
 function onPriceInput() {
-  // Clear preset selection if user inputs custom values
   document.querySelectorAll('.price-btn').forEach(b => b.classList.remove('active'));
   applyFilters();
 }
@@ -885,8 +1071,14 @@ function applyFilters() {
     if (isVisible) visibleCount++;
   });
 
-  const countEl = document.getElementById('visibleCount');
-  if (countEl) countEl.innerText = visibleCount;
+  const counterWrapper = document.getElementById('visibleCounterWrapper');
+  if (counterWrapper) {
+    if (currentLang === 'lv') {
+      counterWrapper.innerHTML = 'Rāda <strong id="visibleCount">' + visibleCount + '</strong> no ' + totalListingCount + ' sludinājumiem';
+    } else {
+      counterWrapper.innerHTML = 'Showing <strong id="visibleCount">' + visibleCount + '</strong> of ' + totalListingCount + ' listings';
+    }
+  }
 
   const noResultsRow = document.getElementById('noResultsRow');
   if (noResultsRow) {
@@ -914,9 +1106,20 @@ function resetFilters() {
   applyFilters();
 }
 
-// Perform initial sort on page load
+// Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
   sortRows();
+  try {
+    const urlLang = new URLSearchParams(window.location.search).get('lang');
+    const savedLang = localStorage.getItem('cc_finder_lang');
+    if (urlLang === 'lv' || urlLang === 'en') {
+      setLanguage(urlLang);
+    } else if (savedLang === 'lv' || savedLang === 'en') {
+      setLanguage(savedLang);
+    } else if (navigator.language && navigator.language.startsWith('lv')) {
+      setLanguage('lv');
+    }
+  } catch (e) {}
 });
 </script>
 </body>

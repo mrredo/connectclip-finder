@@ -1,4 +1,4 @@
-﻿package web
+package web
 
 import (
 	"context"
@@ -90,6 +90,9 @@ func TestDashboardServer(t *testing.T) {
 			`id="scoreBtnCandidates"`,
 			`id="priceBtnTarget"`,
 			`id="visibleCount"`,
+			`id="lang-btn-lv"`,
+			`id="lang-btn-en"`,
+			`data-i18n="`,
 		}
 		for _, el := range filterElements {
 			if !strings.Contains(body, el) {
