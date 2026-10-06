@@ -67,20 +67,26 @@ type Config struct {
 
 // ProductConfig defines target product search terms, scoring rules, and metadata.
 type ProductConfig struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	Icon                 string   `json:"icon"`
-	Category             string   `json:"category"`
-	Description          string   `json:"description"`
-	Enabled              bool     `json:"enabled"`
-	SearchTerms          []string `json:"search_terms"`
-	MinPrice             float64  `json:"min_price"`
-	MaxPrice             float64  `json:"max_price"`
-	AlertThreshold       int      `json:"alert_threshold"`
-	MatchExactKeywords   []string `json:"exact_keywords"`
-	MatchContextKeywords []string `json:"context_keywords"`
-	MatchModelNumbers    []string `json:"model_numbers"`
-	MatchExcludeKeywords []string `json:"exclude_keywords"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	Icon                 string    `json:"icon"`
+	Category             string    `json:"category"`
+	Description          string    `json:"description"`
+	Enabled              bool      `json:"enabled"`
+	SearchTerms          []string  `json:"search_terms"`
+	MinPrice             float64   `json:"min_price"`
+	MaxPrice             float64   `json:"max_price"`
+	AlertThreshold       int       `json:"alert_threshold"`
+	MatchExactKeywords   []string  `json:"exact_keywords"`
+	MatchContextKeywords []string  `json:"context_keywords"`
+	MatchModelNumbers    []string  `json:"model_numbers"`
+	MatchExcludeKeywords []string  `json:"exclude_keywords"`
+	RulePreset           string    `json:"rule_preset,omitempty"`
+	CustomRule           string    `json:"custom_rule,omitempty"`
+	MaxAlertPrice        float64   `json:"max_alert_price,omitempty"`
+	MinAlertPrice        float64   `json:"min_alert_price,omitempty"`
+	CreatedAt            time.Time `json:"created_at,omitempty"`
+	UpdatedAt            time.Time `json:"updated_at,omitempty"`
 }
 
 // Load loads configuration from environment variables and an optional .env file.
@@ -210,6 +216,151 @@ func DefaultProducts(cfg *Config) []ProductConfig {
 			MatchContextKeywords: cfg.MatchContextKeywords,
 			MatchModelNumbers:    cfg.MatchModelNumbers,
 			MatchExcludeKeywords: cfg.MatchExcludeKeywords,
+			RulePreset:           "any_match",
+		},
+		{
+			ID:                   "samsung-s22-fe",
+			Name:                 "Samsung Galaxy S22 FE / S22",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S22 Series (S22 / S22 FE) flagship phone",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S22", "Galaxy S22", "Samsung S22 FE", "Galaxy S22 FE", "SM-S901B"},
+			MinPrice:             120,
+			MaxPrice:             280,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        250,
+			MatchExactKeywords:   []string{"galaxy s22", "samsung s22", "s22 fe"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "128gb", "256gb", "snapdragon", "exynos", "viedtālrunis"},
+			MatchModelNumbers:    []string{"sm-s901b", "sm-s901"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "screen protector", "salauzts", "defekts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s22-ultra",
+			Name:                 "Samsung Galaxy S22 Ultra",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S22 Ultra with S-Pen & 108MP camera",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S22 Ultra", "Galaxy S22 Ultra", "S22 Ultra", "SM-S908B"},
+			MinPrice:             220,
+			MaxPrice:             450,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        400,
+			MatchExactKeywords:   []string{"galaxy s22 ultra", "samsung s22 ultra", "s22 ultra"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "ultra", "s-pen", "256gb", "512gb", "12gb"},
+			MatchModelNumbers:    []string{"sm-s908b", "sm-s908"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "plēve", "salauzts", "defekts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s23-fe",
+			Name:                 "Samsung Galaxy S23 FE",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S23 Fan Edition phone",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S23 FE", "Galaxy S23 FE", "S23 FE", "SM-S711B"},
+			MinPrice:             220,
+			MaxPrice:             390,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        350,
+			MatchExactKeywords:   []string{"galaxy s23 fe", "samsung s23 fe", "s23 fe"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "128gb", "256gb", "5g", "viedtālrunis"},
+			MatchModelNumbers:    []string{"sm-s711b", "sm-s711"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "defekts", "salauzts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s23-ultra",
+			Name:                 "Samsung Galaxy S23 Ultra",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S23 Ultra with Snapdragon 8 Gen 2 & 200MP",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S23 Ultra", "Galaxy S23 Ultra", "S23 Ultra", "SM-S918B"},
+			MinPrice:             380,
+			MaxPrice:             650,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        580,
+			MatchExactKeywords:   []string{"galaxy s23 ultra", "samsung s23 ultra", "s23 ultra"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "ultra", "s-pen", "256gb", "512gb", "snapdragon"},
+			MatchModelNumbers:    []string{"sm-s918b", "sm-s918"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "defekts", "salauzts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s24-fe",
+			Name:                 "Samsung Galaxy S24 FE",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S24 Fan Edition phone with Galaxy AI",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S24 FE", "Galaxy S24 FE", "S24 FE", "SM-S721B"},
+			MinPrice:             380,
+			MaxPrice:             580,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        520,
+			MatchExactKeywords:   []string{"galaxy s24 fe", "samsung s24 fe", "s24 fe"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "128gb", "256gb", "ai", "viedtālrunis"},
+			MatchModelNumbers:    []string{"sm-s721b", "sm-s721"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "defekts", "salauzts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s24-ultra",
+			Name:                 "Samsung Galaxy S24 Ultra",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S24 Ultra Titanium with Galaxy AI & S-Pen",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S24 Ultra", "Galaxy S24 Ultra", "S24 Ultra", "SM-S928B"},
+			MinPrice:             550,
+			MaxPrice:             880,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        750,
+			MatchExactKeywords:   []string{"galaxy s24 ultra", "samsung s24 ultra", "s24 ultra"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "ultra", "titanium", "s-pen", "256gb", "512gb", "ai"},
+			MatchModelNumbers:    []string{"sm-s928b", "sm-s928"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "defekts", "salauzts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s25-ultra",
+			Name:                 "Samsung Galaxy S25 Ultra",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S25 Ultra flagship with Snapdragon 8 Elite",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S25 Ultra", "Galaxy S25 Ultra", "S25 Ultra", "SM-S938B"},
+			MinPrice:             750,
+			MaxPrice:             1200,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        980,
+			MatchExactKeywords:   []string{"galaxy s25 ultra", "samsung s25 ultra", "s25 ultra"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "ultra", "snapdragon", "s-pen", "ai"},
+			MatchModelNumbers:    []string{"sm-s938b", "sm-s938"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "defekts", "salauzts", "detaļām"},
+		},
+		{
+			ID:                   "samsung-s26-ultra",
+			Name:                 "Samsung Galaxy S26 Ultra",
+			Icon:                 "📱",
+			Category:             "Smartphones",
+			Description:          "Samsung Galaxy S26 Ultra flagship generation phone",
+			Enabled:              true,
+			SearchTerms:          []string{"Samsung S26 Ultra", "Galaxy S26 Ultra", "S26 Ultra", "SM-S948B"},
+			MinPrice:             900,
+			MaxPrice:             1450,
+			AlertThreshold:       70,
+			RulePreset:           "great_deal",
+			MaxAlertPrice:        1200,
+			MatchExactKeywords:   []string{"galaxy s26 ultra", "samsung s26 ultra", "s26 ultra"},
+			MatchContextKeywords: []string{"samsung", "galaxy", "ultra", "s-pen", "flagship"},
+			MatchModelNumbers:    []string{"sm-s948b", "sm-s948"},
+			MatchExcludeKeywords: []string{"vāciņš", "case", "stikliņš", "defekts", "salauzts", "detaļām"},
 		},
 		{
 			ID:                   "nintendo-switch-oled",
@@ -226,6 +377,7 @@ func DefaultProducts(cfg *Config) []ProductConfig {
 			MinPrice:             150,
 			MaxPrice:             320,
 			AlertThreshold:       70,
+			RulePreset:           "great_deal",
 			MatchExactKeywords:   []string{"switch oled", "nintendo oled"},
 			MatchContextKeywords: []string{"nintendo", "switch", "oled", "konsole", "console"},
 			MatchModelNumbers:    []string{"heg-001"},
@@ -246,6 +398,7 @@ func DefaultProducts(cfg *Config) []ProductConfig {
 			MinPrice:             100,
 			MaxPrice:             230,
 			AlertThreshold:       70,
+			RulePreset:           "great_deal",
 			MatchExactKeywords:   []string{"airpods pro 2", "airpods pro 2nd"},
 			MatchContextKeywords: []string{"apple", "airpods", "pro", "austiņas", "magsafe", "usb-c"},
 			MatchModelNumbers:    []string{"a2968", "a3047", "a3048", "mqd83"},

@@ -19,6 +19,7 @@
     "min_price": 30,
     "max_price": 200,
     "alert_threshold": 70,
+    "rule_preset": "any_match",
     "exact_keywords": [
       "connectclip",
       "connect clip"
@@ -31,12 +32,373 @@
       "dzirdes"
     ],
     "model_numbers": [
-      "178509"
+      "178509",
+      "ac1a",
+      "2acahac01"
     ],
     "exclude_keywords": [
       "remote control 3.0",
       "edumic",
       "tv adapter 3.0"
+    ]
+  },
+  {
+    "id": "samsung-s22-fe",
+    "name": "Samsung Galaxy S22 FE / S22",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S22 Series (S22 / S22 FE) flagship phone",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S22",
+      "Galaxy S22",
+      "Samsung S22 FE",
+      "Galaxy S22 FE",
+      "SM-S901B"
+    ],
+    "min_price": 120,
+    "max_price": 280,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 250,
+    "exact_keywords": [
+      "galaxy s22",
+      "samsung s22",
+      "s22 fe"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "128gb",
+      "256gb",
+      "snapdragon",
+      "exynos",
+      "viedtālrunis"
+    ],
+    "model_numbers": [
+      "sm-s901b",
+      "sm-s901"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "screen protector",
+      "salauzts",
+      "defekts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s22-ultra",
+    "name": "Samsung Galaxy S22 Ultra",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S22 Ultra with S-Pen & 108MP camera",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S22 Ultra",
+      "Galaxy S22 Ultra",
+      "S22 Ultra",
+      "SM-S908B"
+    ],
+    "min_price": 220,
+    "max_price": 450,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 400,
+    "exact_keywords": [
+      "galaxy s22 ultra",
+      "samsung s22 ultra",
+      "s22 ultra"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "ultra",
+      "s-pen",
+      "256gb",
+      "512gb",
+      "12gb"
+    ],
+    "model_numbers": [
+      "sm-s908b",
+      "sm-s908"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "plēve",
+      "salauzts",
+      "defekts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s23-fe",
+    "name": "Samsung Galaxy S23 FE",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S23 Fan Edition phone",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S23 FE",
+      "Galaxy S23 FE",
+      "S23 FE",
+      "SM-S711B"
+    ],
+    "min_price": 220,
+    "max_price": 390,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 350,
+    "exact_keywords": [
+      "galaxy s23 fe",
+      "samsung s23 fe",
+      "s23 fe"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "128gb",
+      "256gb",
+      "5g",
+      "viedtālrunis"
+    ],
+    "model_numbers": [
+      "sm-s711b",
+      "sm-s711"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "defekts",
+      "salauzts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s23-ultra",
+    "name": "Samsung Galaxy S23 Ultra",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S23 Ultra with Snapdragon 8 Gen 2 & 200MP",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S23 Ultra",
+      "Galaxy S23 Ultra",
+      "S23 Ultra",
+      "SM-S918B"
+    ],
+    "min_price": 380,
+    "max_price": 650,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 580,
+    "exact_keywords": [
+      "galaxy s23 ultra",
+      "samsung s23 ultra",
+      "s23 ultra"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "ultra",
+      "s-pen",
+      "256gb",
+      "512gb",
+      "snapdragon"
+    ],
+    "model_numbers": [
+      "sm-s918b",
+      "sm-s918"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "defekts",
+      "salauzts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s24-fe",
+    "name": "Samsung Galaxy S24 FE",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S24 Fan Edition phone with Galaxy AI",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S24 FE",
+      "Galaxy S24 FE",
+      "S24 FE",
+      "SM-S721B"
+    ],
+    "min_price": 380,
+    "max_price": 580,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 520,
+    "exact_keywords": [
+      "galaxy s24 fe",
+      "samsung s24 fe",
+      "s24 fe"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "128gb",
+      "256gb",
+      "ai",
+      "viedtālrunis"
+    ],
+    "model_numbers": [
+      "sm-s721b",
+      "sm-s721"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "defekts",
+      "salauzts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s24-ultra",
+    "name": "Samsung Galaxy S24 Ultra",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S24 Ultra Titanium with Galaxy AI & S-Pen",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S24 Ultra",
+      "Galaxy S24 Ultra",
+      "S24 Ultra",
+      "SM-S928B"
+    ],
+    "min_price": 550,
+    "max_price": 880,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 750,
+    "exact_keywords": [
+      "galaxy s24 ultra",
+      "samsung s24 ultra",
+      "s24 ultra"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "ultra",
+      "titanium",
+      "s-pen",
+      "256gb",
+      "512gb",
+      "ai"
+    ],
+    "model_numbers": [
+      "sm-s928b",
+      "sm-s928"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "defekts",
+      "salauzts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s25-ultra",
+    "name": "Samsung Galaxy S25 Ultra",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S25 Ultra flagship with Snapdragon 8 Elite",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S25 Ultra",
+      "Galaxy S25 Ultra",
+      "S25 Ultra",
+      "SM-S938B"
+    ],
+    "min_price": 750,
+    "max_price": 1200,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 980,
+    "exact_keywords": [
+      "galaxy s25 ultra",
+      "samsung s25 ultra",
+      "s25 ultra"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "ultra",
+      "snapdragon",
+      "s-pen",
+      "ai"
+    ],
+    "model_numbers": [
+      "sm-s938b",
+      "sm-s938"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "defekts",
+      "salauzts",
+      "detaļām"
+    ]
+  },
+  {
+    "id": "samsung-s26-ultra",
+    "name": "Samsung Galaxy S26 Ultra",
+    "icon": "📱",
+    "category": "Smartphones",
+    "description": "Samsung Galaxy S26 Ultra flagship generation phone",
+    "enabled": true,
+    "search_terms": [
+      "Samsung S26 Ultra",
+      "Galaxy S26 Ultra",
+      "S26 Ultra",
+      "SM-S948B"
+    ],
+    "min_price": 900,
+    "max_price": 1450,
+    "alert_threshold": 70,
+    "rule_preset": "great_deal",
+    "max_alert_price": 1200,
+    "exact_keywords": [
+      "galaxy s26 ultra",
+      "samsung s26 ultra",
+      "s26 ultra"
+    ],
+    "context_keywords": [
+      "samsung",
+      "galaxy",
+      "ultra",
+      "s-pen",
+      "flagship"
+    ],
+    "model_numbers": [
+      "sm-s948b",
+      "sm-s948"
+    ],
+    "exclude_keywords": [
+      "vāciņš",
+      "case",
+      "stikliņš",
+      "defekts",
+      "salauzts",
+      "detaļām"
     ]
   },
   {
@@ -54,6 +416,7 @@
     "min_price": 150,
     "max_price": 320,
     "alert_threshold": 70,
+    "rule_preset": "great_deal",
     "exact_keywords": [
       "switch oled",
       "nintendo oled"
@@ -91,6 +454,7 @@
     "min_price": 100,
     "max_price": 230,
     "alert_threshold": 70,
+    "rule_preset": "great_deal",
     "exact_keywords": [
       "airpods pro 2",
       "airpods pro 2nd"

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"connectclip-finder/internal/config"
 	"connectclip-finder/internal/model"
 )
 
@@ -620,5 +621,241 @@ func (r *Repository) GetAllSources(ctx context.Context, productID ...string) ([]
 	}
 	return sources, nil
 }
+
+// GetAllProducts returns all products configured in the database, ordered by name.
+func (r *Repository) GetAllProducts(ctx context.Context) ([]config.ProductConfig, error) {
+	query := `
+	SELECT id, name, icon, category, description, enabled, search_terms,
+	       min_price, max_price, alert_threshold, exact_keywords, context_keywords,
+	       model_numbers, exclude_keywords, rule_preset, custom_rule, max_alert_price,
+	       min_alert_price, created_at, updated_at
+	FROM products
+	ORDER BY name ASC`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query products: %w", err)
+	}
+	defer rows.Close()
+
+	var products []config.ProductConfig
+	for rows.Next() {
+		var p config.ProductConfig
+		var searchTermsJSON, exactJSON, contextJSON, modelJSON, excludeJSON sql.NullString
+		var rulePreset, customRule sql.NullString
+		var maxAlertPrice, minAlertPrice sql.NullFloat64
+		var createdAt, updatedAt sql.NullTime
+
+		err := rows.Scan(
+			&p.ID, &p.Name, &p.Icon, &p.Category, &p.Description, &p.Enabled,
+			&searchTermsJSON, &p.MinPrice, &p.MaxPrice, &p.AlertThreshold,
+			&exactJSON, &contextJSON, &modelJSON, &excludeJSON,
+			&rulePreset, &customRule, &maxAlertPrice, &minAlertPrice,
+			&createdAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan product: %w", err)
+		}
+
+		if searchTermsJSON.Valid && searchTermsJSON.String != "" {
+			_ = json.Unmarshal([]byte(searchTermsJSON.String), &p.SearchTerms)
+		}
+		if exactJSON.Valid && exactJSON.String != "" {
+			_ = json.Unmarshal([]byte(exactJSON.String), &p.MatchExactKeywords)
+		}
+		if contextJSON.Valid && contextJSON.String != "" {
+			_ = json.Unmarshal([]byte(contextJSON.String), &p.MatchContextKeywords)
+		}
+		if modelJSON.Valid && modelJSON.String != "" {
+			_ = json.Unmarshal([]byte(modelJSON.String), &p.MatchModelNumbers)
+		}
+		if excludeJSON.Valid && excludeJSON.String != "" {
+			_ = json.Unmarshal([]byte(excludeJSON.String), &p.MatchExcludeKeywords)
+		}
+		if rulePreset.Valid {
+			p.RulePreset = rulePreset.String
+		}
+		if customRule.Valid {
+			p.CustomRule = customRule.String
+		}
+		if maxAlertPrice.Valid {
+			p.MaxAlertPrice = maxAlertPrice.Float64
+		}
+		if minAlertPrice.Valid {
+			p.MinAlertPrice = minAlertPrice.Float64
+		}
+		if createdAt.Valid {
+			p.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			p.UpdatedAt = updatedAt.Time
+		}
+
+		products = append(products, p)
+	}
+	return products, rows.Err()
+}
+
+// GetProductByID returns a single product configuration by its unique ID.
+func (r *Repository) GetProductByID(ctx context.Context, id string) (*config.ProductConfig, error) {
+	query := `
+	SELECT id, name, icon, category, description, enabled, search_terms,
+	       min_price, max_price, alert_threshold, exact_keywords, context_keywords,
+	       model_numbers, exclude_keywords, rule_preset, custom_rule, max_alert_price,
+	       min_alert_price, created_at, updated_at
+	FROM products
+	WHERE id = ?`
+
+	var p config.ProductConfig
+	var searchTermsJSON, exactJSON, contextJSON, modelJSON, excludeJSON sql.NullString
+	var rulePreset, customRule sql.NullString
+	var maxAlertPrice, minAlertPrice sql.NullFloat64
+	var createdAt, updatedAt sql.NullTime
+
+	row := r.db.QueryRowContext(ctx, query, id)
+	err := row.Scan(
+		&p.ID, &p.Name, &p.Icon, &p.Category, &p.Description, &p.Enabled,
+		&searchTermsJSON, &p.MinPrice, &p.MaxPrice, &p.AlertThreshold,
+		&exactJSON, &contextJSON, &modelJSON, &excludeJSON,
+		&rulePreset, &customRule, &maxAlertPrice, &minAlertPrice,
+		&createdAt, &updatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get product by id '%s': %w", id, err)
+	}
+
+	if searchTermsJSON.Valid && searchTermsJSON.String != "" {
+		_ = json.Unmarshal([]byte(searchTermsJSON.String), &p.SearchTerms)
+	}
+	if exactJSON.Valid && exactJSON.String != "" {
+		_ = json.Unmarshal([]byte(exactJSON.String), &p.MatchExactKeywords)
+	}
+	if contextJSON.Valid && contextJSON.String != "" {
+		_ = json.Unmarshal([]byte(contextJSON.String), &p.MatchContextKeywords)
+	}
+	if modelJSON.Valid && modelJSON.String != "" {
+		_ = json.Unmarshal([]byte(modelJSON.String), &p.MatchModelNumbers)
+	}
+	if excludeJSON.Valid && excludeJSON.String != "" {
+		_ = json.Unmarshal([]byte(excludeJSON.String), &p.MatchExcludeKeywords)
+	}
+	if rulePreset.Valid {
+		p.RulePreset = rulePreset.String
+	}
+	if customRule.Valid {
+		p.CustomRule = customRule.String
+	}
+	if maxAlertPrice.Valid {
+		p.MaxAlertPrice = maxAlertPrice.Float64
+	}
+	if minAlertPrice.Valid {
+		p.MinAlertPrice = minAlertPrice.Float64
+	}
+	if createdAt.Valid {
+		p.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		p.UpdatedAt = updatedAt.Time
+	}
+
+	return &p, nil
+}
+
+// UpsertProduct inserts or updates a product in the database.
+func (r *Repository) UpsertProduct(ctx context.Context, p config.ProductConfig) error {
+	if strings.TrimSpace(p.ID) == "" {
+		return fmt.Errorf("product ID cannot be empty")
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		p.Name = p.ID
+	}
+	if p.Icon == "" {
+		p.Icon = "📦"
+	}
+	if p.RulePreset == "" {
+		p.RulePreset = "great_deal"
+	}
+	now := time.Now().UTC()
+
+	stJSON, _ := json.Marshal(p.SearchTerms)
+	exactJSON, _ := json.Marshal(p.MatchExactKeywords)
+	ctxJSON, _ := json.Marshal(p.MatchContextKeywords)
+	modelJSON, _ := json.Marshal(p.MatchModelNumbers)
+	exclJSON, _ := json.Marshal(p.MatchExcludeKeywords)
+
+	query := `
+	INSERT INTO products (
+		id, name, icon, category, description, enabled, search_terms,
+		min_price, max_price, alert_threshold, exact_keywords, context_keywords,
+		model_numbers, exclude_keywords, rule_preset, custom_rule, max_alert_price,
+		min_alert_price, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		name = excluded.name,
+		icon = excluded.icon,
+		category = excluded.category,
+		description = excluded.description,
+		enabled = excluded.enabled,
+		search_terms = excluded.search_terms,
+		min_price = excluded.min_price,
+		max_price = excluded.max_price,
+		alert_threshold = excluded.alert_threshold,
+		exact_keywords = excluded.exact_keywords,
+		context_keywords = excluded.context_keywords,
+		model_numbers = excluded.model_numbers,
+		exclude_keywords = excluded.exclude_keywords,
+		rule_preset = excluded.rule_preset,
+		custom_rule = excluded.custom_rule,
+		max_alert_price = excluded.max_alert_price,
+		min_alert_price = excluded.min_alert_price,
+		updated_at = excluded.updated_at`
+
+	_, err := r.db.ExecContext(ctx, query,
+		p.ID, p.Name, p.Icon, p.Category, p.Description, p.Enabled, string(stJSON),
+		p.MinPrice, p.MaxPrice, p.AlertThreshold, string(exactJSON), string(ctxJSON),
+		string(modelJSON), string(exclJSON), p.RulePreset, p.CustomRule, p.MaxAlertPrice,
+		p.MinAlertPrice, now, now,
+	)
+	return err
+}
+
+// DeleteProduct deletes a product by ID.
+func (r *Repository) DeleteProduct(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM products WHERE id = ?", id)
+	return err
+}
+
+// ImportProductsFromJSON imports multiple products from JSON byte slice into the database.
+func (r *Repository) ImportProductsFromJSON(ctx context.Context, data []byte) (int, error) {
+	var prods []config.ProductConfig
+	if err := json.Unmarshal(data, &prods); err != nil {
+		return 0, fmt.Errorf("failed to parse products JSON: %w", err)
+	}
+
+	imported := 0
+	for _, p := range prods {
+		if strings.TrimSpace(p.ID) == "" {
+			continue
+		}
+		if err := r.UpsertProduct(ctx, p); err != nil {
+			return imported, err
+		}
+		imported++
+	}
+	return imported, nil
+}
+
+// ExportProductsToJSON exports all products from the database into formatted JSON bytes.
+func (r *Repository) ExportProductsToJSON(ctx context.Context) ([]byte, error) {
+	prods, err := r.GetAllProducts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(prods, "", "  ")
+}
+
 
 

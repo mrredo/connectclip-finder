@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"connectclip-finder/internal/config"
 	"connectclip-finder/internal/model"
+	"connectclip-finder/internal/ruleengine"
 	"connectclip-finder/internal/scheduler"
 	"connectclip-finder/internal/storage"
 )
@@ -26,6 +29,7 @@ type Server struct {
 	targetName    string
 	products      []config.ProductConfig
 	httpServer    *http.Server
+	mu            sync.RWMutex
 }
 
 // NewServer initializes the dashboard HTTP server.
@@ -44,6 +48,13 @@ func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler
 			if v != "" {
 				tName = v
 			}
+		}
+	}
+
+	if repo != nil {
+		dbProducts, err := repo.GetAllProducts(context.Background())
+		if err == nil && len(dbProducts) > 0 {
+			products = dbProducts
 		}
 	}
 
@@ -67,6 +78,9 @@ func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler
 	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/records", s.handleDashboard)
 	mux.HandleFunc("/api/products", s.handleAPIProducts)
+	mux.HandleFunc("/api/products/import", s.handleAPIProductsImport)
+	mux.HandleFunc("/api/products/export", s.handleAPIProductsExport)
+	mux.HandleFunc("/api/products/validate-rule", s.handleAPIValidateRule)
 	mux.HandleFunc("/api/listings", s.handleAPIListings)
 	mux.HandleFunc("/api/scan", s.handleAPITriggerScan)
 
@@ -78,6 +92,21 @@ func NewServer(addr string, repo *storage.Repository, sched *scheduler.Scheduler
 	}
 
 	return s
+}
+
+func (s *Server) getProducts(ctx context.Context) []config.ProductConfig {
+	if s.repo != nil {
+		prods, err := s.repo.GetAllProducts(ctx)
+		if err == nil && len(prods) > 0 {
+			s.mu.Lock()
+			s.products = prods
+			s.mu.Unlock()
+			return prods
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]config.ProductConfig{}, s.products...)
 }
 
 // Start begins listening on the configured HTTP address.
@@ -96,20 +125,30 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // ProductCardData contains summary information displayed on the Welcome Screen grid.
 type ProductCardData struct {
-	ID             string
-	Name           string
-	Icon           string
-	Category       string
-	Description    string
-	Enabled        bool
-	SearchTerms    []string
-	MinPrice       float64
-	MaxPrice       float64
-	AlertThreshold int
-	TotalListings  int
-	Candidates     int
-	Notified       int
-	LastSeenAt     string
+	ID                   string
+	Name                 string
+	Icon                 string
+	Category             string
+	Description          string
+	Enabled              bool
+	SearchTerms          []string
+	MinPrice             float64
+	MaxPrice             float64
+	AlertThreshold       int
+	RulePreset           string
+	CustomRule           string
+	MaxAlertPrice        float64
+	MinAlertPrice        float64
+	MatchExactKeywords   []string
+	MatchContextKeywords []string
+	MatchModelNumbers    []string
+	MatchExcludeKeywords []string
+	RulePresetDesc       string
+	RulePresetDescLv     string
+	TotalListings        int
+	Candidates           int
+	Notified             int
+	LastSeenAt           string
 }
 
 // welcomeGridData represents the template data for the Welcome Screen Grid.
@@ -160,33 +199,54 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWelcomeScreen(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	prods := s.getProducts(ctx)
 	pStats, _ := s.repo.GetProductStats(ctx, s.minAlertScore)
 
 	var cards []ProductCardData
 	var totalListings, totalCandidates, totalNotified int
 
-	for _, p := range s.products {
+	for _, p := range prods {
 		ps := pStats[p.ID]
 		lastSeen := "—"
 		if !ps.LastSeenAt.IsZero() {
 			lastSeen = ps.LastSeenAt.Format("15:04 02.01.2006")
 		}
 
+		ruleDescEn := ""
+		ruleDescLv := ""
+		if descs, ok := ruleengine.PresetDescriptions[p.RulePreset]; ok {
+			ruleDescEn = descs["en"]
+			ruleDescLv = descs["lv"]
+		} else if p.RulePreset == "custom" && p.CustomRule != "" {
+			ruleDescEn = "Custom: " + p.CustomRule
+			ruleDescLv = "Pielāgots: " + p.CustomRule
+		}
+
 		cards = append(cards, ProductCardData{
-			ID:             p.ID,
-			Name:           p.Name,
-			Icon:           p.Icon,
-			Category:       p.Category,
-			Description:    p.Description,
-			Enabled:        p.Enabled,
-			SearchTerms:    p.SearchTerms,
-			MinPrice:       p.MinPrice,
-			MaxPrice:       p.MaxPrice,
-			AlertThreshold: p.AlertThreshold,
-			TotalListings:  ps.Total,
-			Candidates:     ps.Candidates,
-			Notified:       ps.Notified,
-			LastSeenAt:     lastSeen,
+			ID:                   p.ID,
+			Name:                 p.Name,
+			Icon:                 p.Icon,
+			Category:             p.Category,
+			Description:          p.Description,
+			Enabled:              p.Enabled,
+			SearchTerms:          p.SearchTerms,
+			MinPrice:             p.MinPrice,
+			MaxPrice:             p.MaxPrice,
+			AlertThreshold:       p.AlertThreshold,
+			RulePreset:           p.RulePreset,
+			CustomRule:           p.CustomRule,
+			MaxAlertPrice:        p.MaxAlertPrice,
+			MinAlertPrice:        p.MinAlertPrice,
+			MatchExactKeywords:   p.MatchExactKeywords,
+			MatchContextKeywords: p.MatchContextKeywords,
+			MatchModelNumbers:    p.MatchModelNumbers,
+			MatchExcludeKeywords: p.MatchExcludeKeywords,
+			RulePresetDesc:       ruleDescEn,
+			RulePresetDescLv:     ruleDescLv,
+			TotalListings:        ps.Total,
+			Candidates:           ps.Candidates,
+			Notified:             ps.Notified,
+			LastSeenAt:           lastSeen,
 		})
 
 		totalListings += ps.Total
@@ -195,7 +255,7 @@ func (s *Server) handleWelcomeScreen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := welcomeGridData{
-		TotalProducts:   len(s.products),
+		TotalProducts:   len(prods),
 		TotalListings:   totalListings,
 		TotalCandidates: totalCandidates,
 		TotalNotified:   totalNotified,
@@ -216,17 +276,18 @@ func (s *Server) handleWelcomeScreen(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRecordsScreen(w http.ResponseWriter, r *http.Request, productID string) {
 	ctx := r.Context()
+	prods := s.getProducts(ctx)
 
 	var currProduct *config.ProductConfig
-	for i := range s.products {
-		if s.products[i].ID == productID {
-			currProduct = &s.products[i]
+	for i := range prods {
+		if prods[i].ID == productID {
+			currProduct = &prods[i]
 			break
 		}
 	}
 	if currProduct == nil {
-		if len(s.products) > 0 {
-			currProduct = &s.products[0]
+		if len(prods) > 0 {
+			currProduct = &prods[0]
 			productID = currProduct.ID
 		} else {
 			currProduct = &config.ProductConfig{
@@ -326,52 +387,312 @@ func (s *Server) handleRecordsScreen(w http.ResponseWriter, r *http.Request, pro
 
 func (s *Server) handleAPIProducts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	pStats, _ := s.repo.GetProductStats(ctx, s.minAlertScore)
 
-	type productAPIItem struct {
-		ID             string   `json:"id"`
-		Name           string   `json:"name"`
-		Icon           string   `json:"icon"`
-		Category       string   `json:"category"`
-		Description    string   `json:"description"`
-		Enabled        bool     `json:"enabled"`
-		SearchTerms    []string `json:"search_terms"`
-		MinPrice       float64  `json:"min_price"`
-		MaxPrice       float64  `json:"max_price"`
-		AlertThreshold int      `json:"alert_threshold"`
-		Total          int      `json:"total"`
-		Candidates     int      `json:"candidates"`
-		Notified       int      `json:"notified"`
-		LastSeen       string   `json:"last_seen"`
+	switch r.Method {
+	case http.MethodGet:
+		prods := s.getProducts(ctx)
+		pStats, _ := s.repo.GetProductStats(ctx, s.minAlertScore)
+
+		type productAPIItem struct {
+			ID                   string   `json:"id"`
+			Name                 string   `json:"name"`
+			Icon                 string   `json:"icon"`
+			Category             string   `json:"category"`
+			Description          string   `json:"description"`
+			Enabled              bool     `json:"enabled"`
+			SearchTerms          []string `json:"search_terms"`
+			MinPrice             float64  `json:"min_price"`
+			MaxPrice             float64  `json:"max_price"`
+			AlertThreshold       int      `json:"alert_threshold"`
+			RulePreset           string   `json:"rule_preset"`
+			CustomRule           string   `json:"custom_rule"`
+			MaxAlertPrice        float64  `json:"max_alert_price"`
+			MinAlertPrice        float64  `json:"min_alert_price"`
+			MatchExactKeywords   []string `json:"match_exact_keywords,omitempty"`
+			MatchContextKeywords []string `json:"match_context_keywords,omitempty"`
+			MatchModelNumbers    []string `json:"match_model_numbers,omitempty"`
+			MatchExcludeKeywords []string `json:"match_exclude_keywords,omitempty"`
+			Total                int      `json:"total"`
+			Candidates           int      `json:"candidates"`
+			Notified             int      `json:"notified"`
+			LastSeen             string   `json:"last_seen"`
+		}
+
+		items := make([]productAPIItem, 0, len(prods))
+		for _, p := range prods {
+			ps := pStats[p.ID]
+			lastSeenStr := ""
+			if !ps.LastSeenAt.IsZero() {
+				lastSeenStr = ps.LastSeenAt.Format(time.RFC3339)
+			}
+			items = append(items, productAPIItem{
+				ID:                   p.ID,
+				Name:                 p.Name,
+				Icon:                 p.Icon,
+				Category:             p.Category,
+				Description:          p.Description,
+				Enabled:              p.Enabled,
+				SearchTerms:          p.SearchTerms,
+				MinPrice:             p.MinPrice,
+				MaxPrice:             p.MaxPrice,
+				AlertThreshold:       p.AlertThreshold,
+				RulePreset:           p.RulePreset,
+				CustomRule:           p.CustomRule,
+				MaxAlertPrice:        p.MaxAlertPrice,
+				MinAlertPrice:        p.MinAlertPrice,
+				MatchExactKeywords:   p.MatchExactKeywords,
+				MatchContextKeywords: p.MatchContextKeywords,
+				MatchModelNumbers:    p.MatchModelNumbers,
+				MatchExcludeKeywords: p.MatchExcludeKeywords,
+				Total:                ps.Total,
+				Candidates:           ps.Candidates,
+				Notified:             ps.Notified,
+				LastSeen:             lastSeenStr,
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(items)
+
+	case http.MethodPost:
+		var p config.ProductConfig
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		p.Name = strings.TrimSpace(p.Name)
+		if p.Name == "" {
+			http.Error(w, "Product name is required", http.StatusBadRequest)
+			return
+		}
+
+		p.ID = strings.TrimSpace(p.ID)
+		if p.ID == "" {
+			slug := strings.ToLower(p.Name)
+			slug = strings.ReplaceAll(slug, " ", "-")
+			slug = strings.Map(func(r rune) rune {
+				if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+					return r
+				}
+				return -1
+			}, slug)
+			p.ID = slug
+		}
+
+		if p.Icon == "" {
+			p.Icon = "📦"
+		}
+		if p.Category == "" {
+			p.Category = "general"
+		}
+		if p.AlertThreshold <= 0 {
+			p.AlertThreshold = s.minAlertScore
+			if p.AlertThreshold <= 0 {
+				p.AlertThreshold = 70
+			}
+		}
+		if p.RulePreset == "" {
+			p.RulePreset = ruleengine.PresetGreatDeal
+		}
+		if p.RulePreset == ruleengine.PresetCustom && p.CustomRule != "" {
+			if _, err := ruleengine.Validate(p.CustomRule); err != nil {
+				http.Error(w, "Invalid custom rule formula: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
+		if err := s.repo.UpsertProduct(ctx, p); err != nil {
+			http.Error(w, "Failed to save product: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		updated, _ := s.repo.GetAllProducts(ctx)
+		s.mu.Lock()
+		s.products = updated
+		s.mu.Unlock()
+		if s.sched != nil {
+			s.sched.SetProducts(updated)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"product": p,
+		})
+
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			var bodyReq struct {
+				ID string `json:"id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&bodyReq)
+			id = strings.TrimSpace(bodyReq.ID)
+		}
+
+		if id == "" {
+			http.Error(w, "Missing product id", http.StatusBadRequest)
+			return
+		}
+
+		if id == "oticon-connectclip" {
+			http.Error(w, "oticon-connectclip is the anchor product and cannot be deleted", http.StatusBadRequest)
+			return
+		}
+
+		if err := s.repo.DeleteProduct(ctx, id); err != nil {
+			http.Error(w, "Failed to delete product: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		updated, _ := s.repo.GetAllProducts(ctx)
+		s.mu.Lock()
+		s.products = updated
+		s.mu.Unlock()
+		if s.sched != nil {
+			s.sched.SetProducts(updated)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "ok",
+			"deleted_id": id,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAPIProductsImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
 
-	items := make([]productAPIItem, 0, len(s.products))
-	for _, p := range s.products {
-		ps := pStats[p.ID]
-		lastSeenStr := ""
-		if !ps.LastSeenAt.IsZero() {
-			lastSeenStr = ps.LastSeenAt.Format(time.RFC3339)
+	var data []byte
+	ct := r.Header.Get("Content-Type")
+	if strings.Contains(ct, "multipart/form-data") {
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "Failed to read uploaded file: "+err.Error(), http.StatusBadRequest)
+			return
 		}
-		items = append(items, productAPIItem{
-			ID:             p.ID,
-			Name:           p.Name,
-			Icon:           p.Icon,
-			Category:       p.Category,
-			Description:    p.Description,
-			Enabled:        p.Enabled,
-			SearchTerms:    p.SearchTerms,
-			MinPrice:       p.MinPrice,
-			MaxPrice:       p.MaxPrice,
-			AlertThreshold: p.AlertThreshold,
-			Total:          ps.Total,
-			Candidates:     ps.Candidates,
-			Notified:       ps.Notified,
-			LastSeen:       lastSeenStr,
-		})
+		defer file.Close()
+		var readErr error
+		data, readErr = io.ReadAll(file)
+		if readErr != nil {
+			http.Error(w, "Failed to read file content: "+readErr.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		var err error
+		data, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	count, err := s.repo.ImportProductsFromJSON(r.Context(), data)
+	if err != nil {
+		http.Error(w, "Failed to import products: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	updated, _ := s.repo.GetAllProducts(r.Context())
+	s.mu.Lock()
+	s.products = updated
+	s.mu.Unlock()
+	if s.sched != nil {
+		s.sched.SetProducts(updated)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(items)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":         "ok",
+		"imported_count": count,
+		"total_products": len(updated),
+	})
+}
+
+func (s *Server) handleAPIProductsExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	data, err := s.repo.ExportProductsToJSON(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to export products: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"products.json\"")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleAPIValidateRule(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type validateReq struct {
+		Rule           string  `json:"rule"`
+		Preset         string  `json:"preset"`
+		Price          float64 `json:"price"`
+		Score          float64 `json:"score"`
+		TargetMinPrice float64 `json:"target_min_price"`
+		TargetMaxPrice float64 `json:"target_max_price"`
+		MaxAlertPrice  float64 `json:"max_alert_price"`
+		MinAlertPrice  float64 `json:"min_alert_price"`
+		AlertThreshold float64 `json:"alert_threshold"`
+		HasPhoto       bool    `json:"has_photo"`
+		Source         string  `json:"source"`
+	}
+
+	var req validateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	rule := req.Rule
+	if rule == "" && req.Preset != "" {
+		rule = ruleengine.ResolvePresetEquation(req.Preset, req.TargetMaxPrice, req.AlertThreshold)
+	}
+
+	ruleCtx := ruleengine.Context{
+		Price:          req.Price,
+		Score:          req.Score,
+		TargetMinPrice: req.TargetMinPrice,
+		TargetMaxPrice: req.TargetMaxPrice,
+		MaxAlertPrice:  req.MaxAlertPrice,
+		MinAlertPrice:  req.MinAlertPrice,
+		AlertThreshold: req.AlertThreshold,
+		HasPhoto:       req.HasPhoto,
+		Source:         req.Source,
+	}
+	if ruleCtx.AlertThreshold <= 0 {
+		ruleCtx.AlertThreshold = float64(s.minAlertScore)
+	}
+
+	passes, reason, err := ruleengine.Evaluate(rule, ruleCtx)
+	resp := map[string]any{
+		"valid":    err == nil,
+		"equation": rule,
+		"passes":   passes,
+		"reason":   reason,
+	}
+	if err != nil {
+		resp["error"] = err.Error()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleAPIListings(w http.ResponseWriter, r *http.Request) {
@@ -494,6 +815,7 @@ const welcomeHTML = `<!DOCTYPE html>
     --primary-hover: #0284c7;
     --high: #22c55e;
     --medium: #f59e0b;
+    --danger: #ef4444;
     --low: #64748b;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -522,7 +844,7 @@ const welcomeHTML = `<!DOCTYPE html>
     border-radius: 9999px;
     font-weight: 600;
   }
-  .actions { display: flex; gap: 12px; align-items: center; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .btn {
     background: var(--primary);
     color: #0f172a;
@@ -542,6 +864,11 @@ const welcomeHTML = `<!DOCTYPE html>
   .btn-sm { padding: 6px 12px; font-size: 0.82rem; }
   .btn-secondary { background: var(--card-border); color: #fff; }
   .btn-secondary:hover { background: #475569; }
+  .btn-success { background: #10b981; color: #fff; }
+  .btn-success:hover { background: #059669; }
+  .btn-danger { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+  .btn-danger:hover { background: #ef4444; color: #fff; }
+  .btn-icon { padding: 8px 12px; font-size: 0.9rem; }
 
   /* Language Switcher */
   .lang-switch {
@@ -716,14 +1043,14 @@ const welcomeHTML = `<!DOCTYPE html>
     font-size: 0.88rem;
     color: var(--text-muted);
     line-height: 1.45;
-    margin-bottom: 16px;
-    min-height: 40px;
+    margin-bottom: 14px;
+    min-height: 38px;
   }
   .card-pills {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
   .pill {
     font-size: 0.75rem;
@@ -735,6 +1062,7 @@ const welcomeHTML = `<!DOCTYPE html>
   }
   .pill-price { color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); }
   .pill-score { color: #4ade80; border-color: rgba(34, 197, 94, 0.3); }
+  .pill-rule { color: #a855f7; border-color: rgba(168, 85, 247, 0.35); font-weight: 500; }
 
   .card-metrics {
     display: grid;
@@ -755,7 +1083,7 @@ const welcomeHTML = `<!DOCTYPE html>
   .card-last-seen {
     font-size: 0.78rem;
     color: var(--text-muted);
-    margin-bottom: 18px;
+    margin-bottom: 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -763,19 +1091,158 @@ const welcomeHTML = `<!DOCTYPE html>
 
   .card-footer {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
   }
   .btn-view {
     flex: 1;
     justify-content: center;
-    padding: 10px 16px;
-    font-size: 0.92rem;
+    padding: 9px 14px;
+    font-size: 0.9rem;
   }
   .btn-scan-card {
-    padding: 10px 14px;
-    font-size: 0.88rem;
+    padding: 9px 12px;
+    font-size: 0.85rem;
   }
+
+  /* Modal Dialog */
+  .modal-backdrop {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+    padding: 16px;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal-dialog {
+    background: #1e293b;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    width: 720px;
+    max-width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  }
+  .modal-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--card-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-title { font-size: 1.2rem; font-weight: 700; color: #fff; }
+  .modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.4rem;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+  }
+  .modal-close:hover { color: #fff; }
+  .modal-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--card-border);
+    background: #0f172a;
+    padding: 0 16px;
+  }
+  .modal-tab-btn {
+    padding: 12px 18px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.88rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .modal-tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
+  .modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--card-border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background: #1e293b;
+  }
+
+  /* Form Elements */
+  .form-group { margin-bottom: 16px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .form-label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #cbd5e1;
+    margin-bottom: 6px;
+  }
+  .form-input, .form-select, .form-textarea {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus {
+    outline: 1px solid var(--primary);
+    border-color: var(--primary);
+  }
+  .form-help {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    line-height: 1.35;
+  }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip {
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: #334155;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    cursor: pointer;
+    font-family: monospace;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .chip:hover { background: #475569; color: #fff; border-color: var(--primary); }
+  .chip.chip-op { background: #1e1e38; color: #38bdf8; }
+  .chip.chip-op:hover { background: #2d2d54; }
+
+  .formula-tester {
+    margin-top: 14px;
+    padding: 12px;
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+  }
+  .formula-result {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    display: none;
+  }
+  .formula-result.pass { display: block; background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+  .formula-result.fail { display: block; background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
 
   /* Toast Notification */
   .toast {
@@ -811,7 +1278,7 @@ const welcomeHTML = `<!DOCTYPE html>
     <div>
       <h1>🔎 <span data-i18n="app_title">Marketplace Product Finder</span> <span class="badge-app" data-i18n="app_badge">Multi-Product Monitor</span></h1>
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;" data-i18n="welcome_sub">
-        Concurrent marketplace monitoring for Oticon ConnectClip, gaming consoles, electronics & more
+        Concurrent marketplace monitoring with custom deal equations & Telegram alerts
       </p>
     </div>
     <div class="actions">
@@ -820,6 +1287,16 @@ const welcomeHTML = `<!DOCTYPE html>
         <button id="welcome-lang-lv" class="lang-btn" onclick="setWelcomeLang('lv')">🇱🇻 Latviešu</button>
         <button id="welcome-lang-en" class="lang-btn active" onclick="setWelcomeLang('en')">🇬🇧 English</button>
       </div>
+
+      <button class="btn btn-success" onclick="openAddModal()">
+        <span data-i18n="btn_add_product">➕ Add Product</span>
+      </button>
+      <button class="btn btn-secondary" onclick="openImportModal()">
+        <span data-i18n="btn_import_json">📥 Import JSON</span>
+      </button>
+      <a href="/api/products/export" class="btn btn-secondary" download="products.json">
+        <span data-i18n="btn_export_json">📤 Export JSON</span>
+      </a>
 
       <button class="btn" id="btnScanAll" onclick="triggerAllScan(this)">
         <span data-i18n="btn_scan_all">⚡ Scan All Products</span>
@@ -890,6 +1367,9 @@ const welcomeHTML = `<!DOCTYPE html>
             <div class="pill pill-score">
               <span data-i18n="score_thresh">Threshold:</span> &ge;{{.AlertThreshold}}%
             </div>
+            <div class="pill pill-rule" title="{{if .CustomRule}}{{.CustomRule}}{{else}}{{.RulePresetDesc}}{{end}}">
+              ⚖️ {{if .RulePresetDescLv}}{{.RulePresetDescLv}}{{else}}{{.RulePreset}}{{end}}
+            </div>
             <div class="pill">
               {{len .SearchTerms}} <span data-i18n="search_terms_count">queries</span>
             </div>
@@ -921,15 +1401,198 @@ const welcomeHTML = `<!DOCTYPE html>
             <span data-i18n="view_records">View Records →</span>
           </a>
           <button class="btn btn-secondary btn-scan-card" id="btn-scan-{{.ID}}" onclick="triggerProductScan('{{.ID}}', this)" title="Scan now">
-            <span data-i18n="scan_now">Scan Now ⚡</span>
+            <span data-i18n="scan_now">Scan ⚡</span>
           </button>
+          <button class="btn btn-secondary btn-icon" onclick="openEditModal('{{.ID}}')" title="Edit product">✏️</button>
+          {{if ne .ID "oticon-connectclip"}}
+          <button class="btn btn-danger btn-icon" onclick="deleteProduct('{{.ID}}', '{{.Name}}')" title="Delete product">🗑️</button>
+          {{end}}
         </div>
       </div>
     {{else}}
       <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: var(--card); border: 1px solid var(--card-border); border-radius: 12px; color: var(--text-muted);" data-i18n="no_products">
-        No products configured. Check products.json.
+        No products configured. Click "+ Add Product" or "Import JSON".
       </div>
     {{end}}
+  </div>
+</div>
+
+<!-- Add / Edit Product Modal -->
+<div id="productModal" class="modal-backdrop">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <div class="modal-title" id="productModalTitle" data-i18n="modal_add_title">Add New Product</div>
+      <button class="modal-close" onclick="closeProductModal()">&times;</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="modal-tab-btn active" onclick="switchModalTab('tabBasic', this)" data-i18n="tab_basic">1. Basic Info</button>
+      <button class="modal-tab-btn" onclick="switchModalTab('tabSearch', this)" data-i18n="tab_search">2. Search & Keywords</button>
+      <button class="modal-tab-btn" onclick="switchModalTab('tabRules', this)" data-i18n="tab_rules">3. Pricing & Equation</button>
+    </div>
+    <form id="productForm" onsubmit="saveProduct(event)">
+      <div class="modal-body">
+        <!-- Tab 1: Basic Info -->
+        <div id="tabBasic" class="tab-pane active">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_name">Product Name *</label>
+              <input type="text" id="pName" class="form-input" required placeholder="e.g. Samsung Galaxy S24 Ultra" oninput="autoSlug()">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_id">Product ID (slug) *</label>
+              <input type="text" id="pID" class="form-input" required placeholder="e.g. samsung-s24-ultra">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_icon">Icon Emoji</label>
+              <input type="text" id="pIcon" class="form-input" value="📱" placeholder="Emoji symbol">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_category">Category</label>
+              <select id="pCategory" class="form-select">
+                <option value="smartphones">Smartphones / Viedtālruņi</option>
+                <option value="hearing-aids">Hearing Aids / Dzirdes aparāti</option>
+                <option value="gaming">Gaming & Consoles / Spēles</option>
+                <option value="audio">Audio & Headphones / Audio</option>
+                <option value="electronics">Electronics / Elektronika</option>
+                <option value="general">General / Cits</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" data-i18n="lbl_description">Description</label>
+            <textarea id="pDescription" class="form-textarea" rows="2" placeholder="Brief notes or target specifications..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="pEnabled" checked style="width:16px; height:16px;">
+              <span class="form-label" style="margin:0;" data-i18n="lbl_enabled">Monitoring Active</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Tab 2: Search & Keywords -->
+        <div id="tabSearch" class="tab-pane" style="display:none;">
+          <div class="form-group">
+            <label class="form-label" data-i18n="lbl_search_terms">Search Queries (one per line) *</label>
+            <textarea id="pSearchTerms" class="form-textarea" rows="4" required placeholder="Samsung S24 Ultra&#10;Galaxy S24 Ultra&#10;S24 Ultra"></textarea>
+            <div class="form-help" data-i18n="help_search_terms">Marketplace search queries used when querying ss.com, andele, banknote, etc.</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" data-i18n="lbl_model_numbers">Model Numbers (comma separated)</label>
+            <input type="text" id="pModelNumbers" class="form-input" placeholder="e.g. S928, SM-S928B, 178509">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" data-i18n="lbl_exclude_words">Negative / Exclude Words (comma separated)</label>
+            <input type="text" id="pExcludeWords" class="form-input" placeholder="e.g. case, vāciņš, cover, stikls, dummy, broken, bojāts">
+            <div class="form-help" data-i18n="help_exclude_words">Listings containing these words are penalized or skipped.</div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Pricing & Custom Deal Equation -->
+        <div id="tabRules" class="tab-pane" style="display:none;">
+          <div class="form-row-3">
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_target_min">Target Min Price (€)</label>
+              <input type="number" step="1" id="pMinPrice" class="form-input" placeholder="e.g. 500">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_target_max">Target Max Price (€)</label>
+              <input type="number" step="1" id="pMaxPrice" class="form-input" placeholder="e.g. 850">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_alert_thresh">Alert Threshold (%)</label>
+              <input type="number" min="1" max="100" id="pAlertThreshold" class="form-input" value="70">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_max_alert_price">Max Alert Price Bound (€)</label>
+              <input type="number" step="1" id="pMaxAlertPrice" class="form-input" placeholder="Never alert above this price">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_deal_preset">Deal Strategy Preset</label>
+              <select id="pRulePreset" class="form-select" onchange="handlePresetChange()">
+                <option value="great_deal">Laba cena / Great Deal (price within target max & score >= threshold)</option>
+                <option value="steal_deal">Īpaši izdevīgs / Steal Deal (price <= 75% target max)</option>
+                <option value="high_match_photo">Augsta atbilstība ar foto / High Match + Photo (score >= 80 & has photo)</option>
+                <option value="budget_limit">Stingrs budžets / Strict Budget (price <= target max)</option>
+                <option value="any_match">Jebkura atbilstība / Any Match (ignore price)</option>
+                <option value="custom">Pielāgots vienādojums / Custom Equation</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" data-i18n="lbl_custom_rule">Custom Deal Equation Formula</label>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;" data-i18n="help_click_vars">Click variables & operators to insert into equation:</div>
+            <div class="chip-group">
+              <span class="chip" onclick="insertVar('price')">price</span>
+              <span class="chip" onclick="insertVar('score')">score</span>
+              <span class="chip" onclick="insertVar('target_max_price')">target_max_price</span>
+              <span class="chip" onclick="insertVar('target_min_price')">target_min_price</span>
+              <span class="chip" onclick="insertVar('max_alert_price')">max_alert_price</span>
+              <span class="chip" onclick="insertVar('alert_threshold')">alert_threshold</span>
+              <span class="chip" onclick="insertVar('has_photo')">has_photo</span>
+              <span class="chip chip-op" onclick="insertVar(' && ')">&amp;&amp;</span>
+              <span class="chip chip-op" onclick="insertVar(' || ')">||</span>
+              <span class="chip chip-op" onclick="insertVar(' <= ')">&lt;=</span>
+              <span class="chip chip-op" onclick="insertVar(' >= ')">&gt;=</span>
+              <span class="chip chip-op" onclick="insertVar(' == 1 ')">== 1</span>
+              <span class="chip chip-op" onclick="insertVar(' * 0.75 ')">* 0.75</span>
+            </div>
+            <textarea id="pCustomRule" class="form-textarea" rows="2" placeholder="price > 0 && price <= target_max_price && score >= alert_threshold"></textarea>
+            <div class="form-help" data-i18n="help_equation">Leave blank to use the selected strategy preset automatically.</div>
+          </div>
+
+          <!-- Live Equation Tester -->
+          <div class="formula-tester">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.8rem; font-weight:600; color:#fff;" data-i18n="lbl_test_box">Live Formula Verification</span>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="testFormula()" data-i18n="btn_test_formula">Test Formula</button>
+            </div>
+            <div id="testResult" class="formula-result"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeProductModal()" data-i18n="btn_cancel">Cancel</button>
+        <button type="submit" class="btn btn-success" data-i18n="btn_save">Save Product</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Import JSON Modal -->
+<div id="importModal" class="modal-backdrop">
+  <div class="modal-dialog" style="width:560px;">
+    <div class="modal-header">
+      <div class="modal-title" data-i18n="modal_import_title">Import Products from JSON</div>
+      <button class="modal-close" onclick="closeImportModal()">&times;</button>
+    </div>
+    <form onsubmit="submitImport(event)">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" data-i18n="lbl_import_file">Choose JSON File</label>
+          <input type="file" id="importFileInput" accept=".json" class="form-input" onchange="handleImportFile(event)">
+        </div>
+        <div class="form-group">
+          <label class="form-label" data-i18n="lbl_import_paste">Or Paste JSON Content</label>
+          <textarea id="importJSONText" class="form-textarea" rows="8" placeholder='[&#10;  {&#10;    "id": "samsung-s24-ultra",&#10;    "name": "Samsung Galaxy S24 Ultra",&#10;    ...&#10;  }&#10;]'></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeImportModal()" data-i18n="btn_cancel">Cancel</button>
+        <button type="submit" class="btn btn-success" data-i18n="btn_import_action">Import Products</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -943,7 +1606,10 @@ const welcomeI18n = {
   en: {
     app_title: "Marketplace Product Finder",
     app_badge: "Multi-Product Monitor",
-    welcome_sub: "Concurrent marketplace monitoring for Oticon ConnectClip, gaming consoles, electronics & more",
+    welcome_sub: "Concurrent marketplace monitoring with custom deal equations & Telegram alerts",
+    btn_add_product: "➕ Add Product",
+    btn_import_json: "📥 Import JSON",
+    btn_export_json: "📤 Export JSON",
     btn_scan_all: "⚡ Scan All Products",
     btn_refresh: "Refresh",
     stat_monitored: "Monitored Products",
@@ -953,7 +1619,7 @@ const welcomeI18n = {
     search_placeholder: "Filter products by name or category...",
     products_count_suffix: "products active",
     view_records: "View Records →",
-    scan_now: "Scan Now ⚡",
+    scan_now: "Scan ⚡",
     status_active: "Active",
     status_paused: "Paused",
     label_total: "Total",
@@ -963,14 +1629,52 @@ const welcomeI18n = {
     target_price: "Target:",
     score_thresh: "Threshold:",
     search_terms_count: "queries",
+    modal_add_title: "Add New Product",
+    modal_edit_title: "Edit Product",
+    tab_basic: "1. Basic Info",
+    tab_search: "2. Search & Keywords",
+    tab_rules: "3. Pricing & Equation",
+    lbl_name: "Product Name *",
+    lbl_id: "Product ID (slug) *",
+    lbl_icon: "Icon Emoji",
+    lbl_category: "Category",
+    lbl_description: "Description",
+    lbl_enabled: "Monitoring Active",
+    lbl_search_terms: "Search Queries (one per line) *",
+    help_search_terms: "Marketplace search queries used when querying ss.com, andele, banknote, etc.",
+    lbl_model_numbers: "Model Numbers (comma separated)",
+    lbl_exclude_words: "Negative / Exclude Words (comma separated)",
+    help_exclude_words: "Listings containing these words are penalized or skipped.",
+    lbl_target_min: "Target Min Price (€)",
+    lbl_target_max: "Target Max Price (€)",
+    lbl_alert_thresh: "Alert Threshold (%)",
+    lbl_max_alert_price: "Max Alert Price Bound (€)",
+    lbl_deal_preset: "Deal Strategy Preset",
+    lbl_custom_rule: "Custom Deal Equation Formula",
+    help_click_vars: "Click variables & operators to insert into equation:",
+    help_equation: "Leave blank to use the selected strategy preset automatically.",
+    lbl_test_box: "Live Formula Verification",
+    btn_test_formula: "Test Formula",
+    btn_cancel: "Cancel",
+    btn_save: "Save Product",
+    modal_import_title: "Import Products from JSON",
+    lbl_import_file: "Choose JSON File",
+    lbl_import_paste: "Or Paste JSON Content",
+    btn_import_action: "Import Products",
     toast_all_started: "Scan started for all products in background!",
     toast_single_started: "Scan started for selected product in background!",
-    no_products: "No products configured."
+    toast_saved: "Product saved successfully!",
+    toast_deleted: "Product deleted!",
+    toast_imported: "Products imported successfully!",
+    no_products: "No products configured. Click '+ Add Product' or 'Import JSON'."
   },
   lv: {
     app_title: "Tirgus Preču Meklētājs",
     app_badge: "Vairāku Preču Monitors",
-    welcome_sub: "Vienlaicīga tirgus uzraudzība: Oticon ConnectClip, spēļu konsoles, tehnika un citas preces",
+    welcome_sub: "Vienlaicīga tirgus uzraudzība ar pielāgotiem darījumu vienādojumiem un Telegram paziņojumiem",
+    btn_add_product: "➕ Pievienot preci",
+    btn_import_json: "📥 Importēt JSON",
+    btn_export_json: "📤 Eksportēt JSON",
     btn_scan_all: "⚡ Skenēt visus produktus",
     btn_refresh: "Atjaunot",
     stat_monitored: "Uzraudzītie produkti",
@@ -980,7 +1684,7 @@ const welcomeI18n = {
     search_placeholder: "Filtrēt produktus pēc nosaukuma vai kategorijas...",
     products_count_suffix: "aktīvi produkti",
     view_records: "Skatīt ierakstus →",
-    scan_now: "Skenēt tagad ⚡",
+    scan_now: "Skenēt ⚡",
     status_active: "Aktīvs",
     status_paused: "Apturēts",
     label_total: "Kopā",
@@ -990,9 +1694,44 @@ const welcomeI18n = {
     target_price: "Mērķis:",
     score_thresh: "Slieksnis:",
     search_terms_count: "vaicājumi",
+    modal_add_title: "Pievienot jaunu preci",
+    modal_edit_title: "Rediģēt preci",
+    tab_basic: "1. Pamatinformācija",
+    tab_search: "2. Meklēšana un atslēgvārdi",
+    tab_rules: "3. Cenas un vienādojums",
+    lbl_name: "Preces nosaukums *",
+    lbl_id: "Preces ID (slug) *",
+    lbl_icon: "Ikonas emocijzīme",
+    lbl_category: "Kategorija",
+    lbl_description: "Apraksts",
+    lbl_enabled: "Uzraudzība aktīva",
+    lbl_search_terms: "Meklēšanas vaicājumi (viens rindā) *",
+    help_search_terms: "Meklēšanas frāzes portālos ss.com, andele, banknote utt.",
+    lbl_model_numbers: "Modeļu numuri (ar komatiem)",
+    lbl_exclude_words: "Izslēdzamie / negatīvie vārdi (ar komatiem)",
+    help_exclude_words: "Sludinājumi ar šiem vārdiem tiek pazemināti vai izlaisti.",
+    lbl_target_min: "Mērķa minimālā cena (€)",
+    lbl_target_max: "Mērķa maksimālā cena (€)",
+    lbl_alert_thresh: "Brīdinājuma slieksnis (%)",
+    lbl_max_alert_price: "Maks. brīdinājuma cenas griesti (€)",
+    lbl_deal_preset: "Darījuma stratēģijas sagatave",
+    lbl_custom_rule: "Pielāgota darījuma vienādojuma formula",
+    help_click_vars: "Noklikšķiniet uz mainīgā vai operatora, lai ievietotu formulā:",
+    help_equation: "Atstājiet tukšu, lai automātiski izmantotu izvēlēto sagatavi.",
+    lbl_test_box: "Formulas tūlītēja pārbaude",
+    btn_test_formula: "Pārbaudīt formulu",
+    btn_cancel: "Atcelt",
+    btn_save: "Saglabāt preci",
+    modal_import_title: "Importēt preces no JSON",
+    lbl_import_file: "Izvēlēties JSON failu",
+    lbl_import_paste: "Vai ielīmēt JSON tekstu",
+    btn_import_action: "Importēt preces",
     toast_all_started: "Visu produktu skenēšana palaista fonā!",
     toast_single_started: "Izvēlētā produkta skenēšana palaista fonā!",
-    no_products: "Nav konfigurētu preču."
+    toast_saved: "Prece veiksmīgi saglabāta!",
+    toast_deleted: "Prece izdzēsta!",
+    toast_imported: "Preces veiksmīgi importētas!",
+    no_products: "Nav konfigurētu preču. Noklikšķiniet '+ Pievienot preci' vai 'Importēt JSON'."
   }
 };
 
@@ -1075,6 +1814,266 @@ function triggerProductScan(productID, btn) {
       alert('Error triggering product scan: ' + err);
       if (btn) btn.disabled = false;
     });
+}
+
+/* Modal Management */
+function switchModalTab(tabId, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.modal-tab-btn').forEach(b => b.classList.remove('active'));
+  const target = document.getElementById(tabId);
+  if (target) target.style.display = 'block';
+  if (btn) btn.classList.add('active');
+}
+
+function autoSlug() {
+  const idInput = document.getElementById('pID');
+  if (idInput.getAttribute('data-editing') === 'true') return;
+  const name = document.getElementById('pName').value || '';
+  const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  idInput.value = slug;
+}
+
+function openAddModal() {
+  document.getElementById('productForm').reset();
+  const idInput = document.getElementById('pID');
+  idInput.disabled = false;
+  idInput.removeAttribute('data-editing');
+  document.getElementById('productModalTitle').innerText = welcomeI18n[currentLang].modal_add_title;
+  document.getElementById('pIcon').value = '📱';
+  document.getElementById('pEnabled').checked = true;
+  document.getElementById('pAlertThreshold').value = '70';
+  document.getElementById('pRulePreset').value = 'great_deal';
+  document.getElementById('testResult').style.display = 'none';
+  switchModalTab('tabBasic', document.querySelector('.modal-tab-btn'));
+  document.getElementById('productModal').classList.add('open');
+}
+
+function openEditModal(productID) {
+  fetch('/api/products')
+    .then(r => r.json())
+    .then(products => {
+      const p = products.find(x => x.id === productID);
+      if (!p) {
+        alert('Product not found: ' + productID);
+        return;
+      }
+      document.getElementById('productModalTitle').innerText = welcomeI18n[currentLang].modal_edit_title + ': ' + p.name;
+      const idInput = document.getElementById('pID');
+      idInput.value = p.id;
+      idInput.disabled = true;
+      idInput.setAttribute('data-editing', 'true');
+      document.getElementById('pName').value = p.name || '';
+      document.getElementById('pIcon').value = p.icon || '📱';
+      document.getElementById('pCategory').value = p.category || 'general';
+      document.getElementById('pDescription').value = p.description || '';
+      document.getElementById('pEnabled').checked = p.enabled !== false;
+      document.getElementById('pSearchTerms').value = (p.search_terms || []).join('\n');
+      document.getElementById('pModelNumbers').value = (p.match_model_numbers || []).join(', ');
+      document.getElementById('pExcludeWords').value = (p.match_exclude_keywords || []).join(', ');
+      document.getElementById('pMinPrice').value = p.min_price > 0 ? p.min_price : '';
+      document.getElementById('pMaxPrice').value = p.max_price > 0 ? p.max_price : '';
+      document.getElementById('pAlertThreshold').value = p.alert_threshold || 70;
+      document.getElementById('pMaxAlertPrice').value = p.max_alert_price > 0 ? p.max_alert_price : '';
+      document.getElementById('pRulePreset').value = p.rule_preset || 'great_deal';
+      document.getElementById('pCustomRule').value = p.custom_rule || '';
+      document.getElementById('testResult').style.display = 'none';
+      switchModalTab('tabBasic', document.querySelector('.modal-tab-btn'));
+      document.getElementById('productModal').classList.add('open');
+    })
+    .catch(err => alert('Failed to load product: ' + err));
+}
+
+function closeProductModal() {
+  document.getElementById('productModal').classList.remove('open');
+}
+
+function insertVar(snippet) {
+  const textarea = document.getElementById('pCustomRule');
+  const start = textarea.selectionStart || textarea.value.length;
+  const end = textarea.selectionEnd || textarea.value.length;
+  textarea.value = textarea.value.substring(0, start) + snippet + textarea.value.substring(end);
+  textarea.focus();
+  textarea.selectionStart = textarea.selectionEnd = start + snippet.length;
+}
+
+function handlePresetChange() {
+  const preset = document.getElementById('pRulePreset').value;
+  const customBox = document.getElementById('pCustomRule');
+  if (preset === 'custom' && !customBox.value.trim()) {
+    customBox.value = 'price > 0 && price <= target_max_price && score >= alert_threshold';
+  }
+}
+
+function testFormula() {
+  const rule = document.getElementById('pCustomRule').value.trim();
+  const preset = document.getElementById('pRulePreset').value;
+  const maxPrice = parseFloat(document.getElementById('pMaxPrice').value) || 800;
+  const thresh = parseFloat(document.getElementById('pAlertThreshold').value) || 70;
+  const maxAlert = parseFloat(document.getElementById('pMaxAlertPrice').value) || 0;
+
+  const payload = {
+    rule: rule,
+    preset: preset,
+    price: maxPrice > 0 ? (maxPrice * 0.9) : 350,
+    score: 85,
+    target_max_price: maxPrice,
+    alert_threshold: thresh,
+    max_alert_price: maxAlert,
+    has_photo: true,
+    source: "ss.com"
+  };
+
+  fetch('/api/products/validate-rule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(res => {
+    const el = document.getElementById('testResult');
+    if (!res.valid) {
+      el.className = 'formula-result fail';
+      el.innerText = '❌ Error: ' + res.error;
+    } else if (res.passes) {
+      el.className = 'formula-result pass';
+      el.innerText = '✅ Formula Valid & Passed! Result: ' + res.reason;
+    } else {
+      el.className = 'formula-result fail';
+      el.innerText = '⚠️ Formula Valid, but condition evaluated to FALSE with test values.';
+    }
+  })
+  .catch(err => {
+    const el = document.getElementById('testResult');
+    el.className = 'formula-result fail';
+    el.innerText = '❌ Request failed: ' + err;
+  });
+}
+
+function saveProduct(e) {
+  e.preventDefault();
+  const id = document.getElementById('pID').value.trim();
+  const name = document.getElementById('pName').value.trim();
+  if (!id || !name) {
+    alert('Product Name and ID are required.');
+    return;
+  }
+
+  const searchTerms = document.getElementById('pSearchTerms').value
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const modelNumbers = document.getElementById('pModelNumbers').value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const excludeWords = document.getElementById('pExcludeWords').value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const payload = {
+    id: id,
+    name: name,
+    icon: document.getElementById('pIcon').value.trim() || '📱',
+    category: document.getElementById('pCategory').value,
+    description: document.getElementById('pDescription').value.trim(),
+    enabled: document.getElementById('pEnabled').checked,
+    search_terms: searchTerms,
+    match_model_numbers: modelNumbers,
+    match_exclude_keywords: excludeWords,
+    min_price: parseFloat(document.getElementById('pMinPrice').value) || 0,
+    max_price: parseFloat(document.getElementById('pMaxPrice').value) || 0,
+    alert_threshold: parseInt(document.getElementById('pAlertThreshold').value) || 70,
+    max_alert_price: parseFloat(document.getElementById('pMaxAlertPrice').value) || 0,
+    rule_preset: document.getElementById('pRulePreset').value,
+    custom_rule: document.getElementById('pCustomRule').value.trim()
+  };
+
+  fetch('/api/products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(r => {
+    if (!r.ok) return r.text().then(t => { throw new Error(t); });
+    return r.json();
+  })
+  .then(() => {
+    closeProductModal();
+    showToast(welcomeI18n[currentLang].toast_saved);
+    setTimeout(() => { window.location.reload(); }, 800);
+  })
+  .catch(err => alert('Save failed: ' + err.message));
+}
+
+function deleteProduct(id, name) {
+  if (id === 'oticon-connectclip') {
+    alert('Oticon ConnectClip is the anchor product and cannot be deleted.');
+    return;
+  }
+  const promptMsg = currentLang === 'lv'
+    ? 'Vai tiešām vēlaties dzēst preci "' + name + '"?'
+    : 'Are you sure you want to delete product "' + name + '"?';
+  if (!confirm(promptMsg)) return;
+
+  fetch('/api/products?id=' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(r => {
+      if (!r.ok) return r.text().then(t => { throw new Error(t); });
+      return r.json();
+    })
+    .then(() => {
+      showToast(welcomeI18n[currentLang].toast_deleted);
+      setTimeout(() => { window.location.reload(); }, 800);
+    })
+    .catch(err => alert('Delete failed: ' + err.message));
+}
+
+/* Import Modal */
+function openImportModal() {
+  document.getElementById('importFileInput').value = '';
+  document.getElementById('importJSONText').value = '';
+  document.getElementById('importModal').classList.add('open');
+}
+
+function closeImportModal() {
+  document.getElementById('importModal').classList.remove('open');
+}
+
+function handleImportFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('importJSONText').value = e.target.result;
+  };
+  reader.readAsText(file);
+}
+
+function submitImport(e) {
+  e.preventDefault();
+  const text = document.getElementById('importJSONText').value.trim();
+  if (!text) {
+    alert('Please choose a file or paste JSON content.');
+    return;
+  }
+
+  fetch('/api/products/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: text
+  })
+  .then(r => {
+    if (!r.ok) return r.text().then(t => { throw new Error(t); });
+    return r.json();
+  })
+  .then(res => {
+    closeImportModal();
+    showToast(welcomeI18n[currentLang].toast_imported + ' (' + res.imported_count + ')');
+    setTimeout(() => { window.location.reload(); }, 1000);
+  })
+  .catch(err => alert('Import failed: ' + err.message));
 }
 
 function initWelcome() {

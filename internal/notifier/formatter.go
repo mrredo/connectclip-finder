@@ -45,12 +45,27 @@ func FormatTelegramMessageWithTarget(l *model.Listing, targetName string) string
 
 	sb.WriteString(fmt.Sprintf("🎯 <b>Confidence:</b> %d%% (%s)\n", l.Score, l.Confidence))
 
-	if len(l.MatchReasons) > 0 {
-		topReasons := l.MatchReasons
-		if len(topReasons) > 3 {
-			topReasons = topReasons[:3]
+	var alertReason string
+	var signals []string
+	for _, r := range l.MatchReasons {
+		if strings.HasPrefix(r, "Alert rule met:") || strings.HasPrefix(r, "Match score") {
+			if alertReason == "" {
+				alertReason = r
+			}
+		} else {
+			signals = append(signals, r)
 		}
-		sb.WriteString(fmt.Sprintf("🔍 <b>Signals:</b> %s\n", html.EscapeString(strings.Join(topReasons, "; "))))
+	}
+
+	if alertReason != "" {
+		sb.WriteString(fmt.Sprintf("⚡ <b>Alert Reason:</b> %s\n", html.EscapeString(alertReason)))
+	}
+
+	if len(signals) > 0 {
+		if len(signals) > 3 {
+			signals = signals[:3]
+		}
+		sb.WriteString(fmt.Sprintf("🔍 <b>Signals:</b> %s\n", html.EscapeString(strings.Join(signals, "; "))))
 	}
 
 	if l.URL != "" {

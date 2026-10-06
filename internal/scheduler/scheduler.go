@@ -10,6 +10,7 @@ import (
 	"connectclip-finder/internal/matcher"
 	"connectclip-finder/internal/model"
 	"connectclip-finder/internal/notifier"
+	"connectclip-finder/internal/ruleengine"
 	"connectclip-finder/internal/scraper"
 	"connectclip-finder/internal/storage"
 )
@@ -115,7 +116,12 @@ func (s *Scheduler) RunOnce(ctx context.Context) *model.ScanReport {
 	slog.Info("=== Beginning marketplace scan ===")
 
 	if len(products) == 0 {
-		report := s.runScanForProduct(ctx, "oticon-connectclip", "Oticon ConnectClip", nil, s.matcher, s.minAlertScore, startTime)
+		defaultProd := &config.ProductConfig{
+			ID:             "oticon-connectclip",
+			Name:           "Oticon ConnectClip",
+			AlertThreshold: s.minAlertScore,
+		}
+		report := s.runScanForProduct(ctx, defaultProd, s.matcher, s.minAlertScore, startTime)
 		_ = s.repo.RecordScanRun(ctx, report)
 		return report
 	}
@@ -123,7 +129,8 @@ func (s *Scheduler) RunOnce(ctx context.Context) *model.ScanReport {
 	var allStatuses []model.SourceStatus
 	var totalDiscovered, totalNew, totalCandidates, totalNotifications, totalFailed int
 
-	for _, p := range products {
+	for i := range products {
+		p := &products[i]
 		if !p.Enabled {
 			continue
 		}
@@ -144,7 +151,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) *model.ScanReport {
 		}
 
 		slog.Info("Scanning product", "product_id", p.ID, "name", p.Name, "terms", len(p.SearchTerms))
-		rep := s.runScanForProduct(ctx, p.ID, p.Name, p.SearchTerms, m, thresh, time.Now().UTC())
+		rep := s.runScanForProduct(ctx, p, m, thresh, time.Now().UTC())
 		if rep != nil {
 			totalDiscovered += rep.ListingsDiscovered
 			totalNew += rep.NewListings
@@ -211,7 +218,12 @@ func (s *Scheduler) RunOnceForProduct(ctx context.Context, productID string) *mo
 
 	startTime := time.Now().UTC()
 	if targetProduct == nil {
-		rep := s.runScanForProduct(ctx, productID, productID, nil, s.matcher, s.minAlertScore, startTime)
+		defaultProd := &config.ProductConfig{
+			ID:             productID,
+			Name:           productID,
+			AlertThreshold: s.minAlertScore,
+		}
+		rep := s.runScanForProduct(ctx, defaultProd, s.matcher, s.minAlertScore, startTime)
 		_ = s.repo.RecordScanRun(ctx, rep)
 		return rep
 	}
@@ -225,21 +237,19 @@ func (s *Scheduler) RunOnceForProduct(ctx context.Context, productID string) *mo
 		thresh = s.minAlertScore
 	}
 
-	rep := s.runScanForProduct(ctx, targetProduct.ID, targetProduct.Name, targetProduct.SearchTerms, m, thresh, startTime)
+	rep := s.runScanForProduct(ctx, targetProduct, m, thresh, startTime)
 	_ = s.repo.RecordScanRun(ctx, rep)
 	return rep
 }
 
 func (s *Scheduler) runScanForProduct(
 	ctx context.Context,
-	productID string,
-	productName string,
-	searchTerms []string,
+	targetProduct *config.ProductConfig,
 	m *matcher.Matcher,
 	alertThreshold int,
 	startTime time.Time,
 ) *model.ScanReport {
-	scrapeResult := s.engine.ExecuteForProduct(ctx, productID, searchTerms)
+	scrapeResult := s.engine.ExecuteForProduct(ctx, targetProduct.ID, targetProduct.SearchTerms)
 
 	var newListingsCount int
 	var candidatesCount int
@@ -253,7 +263,7 @@ func (s *Scheduler) runScanForProduct(
 	}
 
 	for _, listing := range scrapeResult.Listings {
-		listing.ProductID = productID
+		listing.ProductID = targetProduct.ID
 		if m != nil {
 			m.Evaluate(listing)
 		}
@@ -264,7 +274,35 @@ func (s *Scheduler) runScanForProduct(
 			}
 		}
 
-		if listing.Score >= alertThreshold {
+		// Evaluate deal alert equation
+		ruleCtx := ruleengine.Context{
+			Price:          listing.Price,
+			Score:          float64(listing.Score),
+			TargetMinPrice: targetProduct.MinPrice,
+			TargetMaxPrice: targetProduct.MaxPrice,
+			MaxAlertPrice:  targetProduct.MaxAlertPrice,
+			MinAlertPrice:  targetProduct.MinAlertPrice,
+			AlertThreshold: float64(alertThreshold),
+			HasPhoto:       listing.PrimaryImage() != "" || len(listing.ImageURLs) > 0,
+			Source:         string(listing.Source),
+		}
+
+		expr := targetProduct.CustomRule
+		if expr == "" && targetProduct.RulePreset != "" {
+			expr = ruleengine.ResolvePresetEquation(targetProduct.RulePreset, targetProduct.MaxPrice, float64(alertThreshold))
+		}
+
+		passesRule, triggerReason, err := ruleengine.Evaluate(expr, ruleCtx)
+		if err != nil {
+			slog.Warn("Deal rule evaluation error", "product", targetProduct.ID, "expr", expr, "error", err)
+			passesRule = listing.Score >= alertThreshold
+		}
+
+		if passesRule && triggerReason != "" {
+			listing.MatchReasons = append([]string{triggerReason}, listing.MatchReasons...)
+		}
+
+		if passesRule {
 			candidatesCount++
 		}
 
@@ -287,20 +325,64 @@ func (s *Scheduler) runScanForProduct(
 		}
 	}
 
-	unnotified, err := s.repo.GetUnnotifiedCandidates(ctx, alertThreshold, productID)
+	unnotified, err := s.repo.GetUnnotifiedCandidates(ctx, alertThreshold, targetProduct.ID)
 	if err != nil {
-		slog.Error("Failed to query unnotified candidates", "product_id", productID, "error", err)
+		slog.Error("Failed to query unnotified candidates", "product_id", targetProduct.ID, "error", err)
 	} else {
 		for _, candidate := range unnotified {
+			ruleCtx := ruleengine.Context{
+				Price:          candidate.Price,
+				Score:          float64(candidate.Score),
+				TargetMinPrice: targetProduct.MinPrice,
+				TargetMaxPrice: targetProduct.MaxPrice,
+				MaxAlertPrice:  targetProduct.MaxAlertPrice,
+				MinAlertPrice:  targetProduct.MinAlertPrice,
+				AlertThreshold: float64(alertThreshold),
+				HasPhoto:       candidate.PrimaryImage() != "" || len(candidate.ImageURLs) > 0,
+				Source:         string(candidate.Source),
+			}
+
+			expr := targetProduct.CustomRule
+			if expr == "" && targetProduct.RulePreset != "" {
+				expr = ruleengine.ResolvePresetEquation(targetProduct.RulePreset, targetProduct.MaxPrice, float64(alertThreshold))
+			}
+
+			passesRule, triggerReason, err := ruleengine.Evaluate(expr, ruleCtx)
+			if err != nil {
+				slog.Warn("Candidate rule eval error", "id", candidate.ID, "error", err)
+				passesRule = candidate.Score >= alertThreshold
+			}
+
+			if !passesRule {
+				slog.Debug("Candidate skipped: deal alert equation not satisfied",
+					"id", candidate.ID, "title", candidate.Title, "price", candidate.Price, "score", candidate.Score)
+				continue
+			}
+
+			if triggerReason != "" {
+				hasReason := false
+				for _, r := range candidate.MatchReasons {
+					if r == triggerReason {
+						hasReason = true
+						break
+					}
+				}
+				if !hasReason {
+					candidate.MatchReasons = append([]string{triggerReason}, candidate.MatchReasons...)
+				}
+			}
+
 			slog.Info("Promising product match found! Sending notification...",
-				"product", productName,
+				"product", targetProduct.Name,
 				"source", candidate.Source,
 				"title", candidate.Title,
 				"score", candidate.Score,
 				"price", candidate.Price,
+				"reason", triggerReason,
 			)
 
 			if s.notifier != nil && s.notifier.IsConfigured() {
+				s.notifier.SetTargetName(targetProduct.Name)
 				if err := s.notifier.SendListingAlert(ctx, candidate); err != nil {
 					slog.Error("Failed to send Telegram alert", "id", candidate.ID, "error", err)
 					continue

@@ -249,5 +249,123 @@ func TestDashboardServer(t *testing.T) {
 			t.Errorf("Expected 1 item, got %d", len(res.Listings))
 		}
 	})
+
+	// Test 5: POST /api/products (Create & Update product with equation)
+	t.Run("POST /api/products Create and Update Product", func(t *testing.T) {
+		newProdJSON := `{
+			"id": "samsung-s26-ultra",
+			"name": "Samsung Galaxy S26 Ultra",
+			"category": "smartphones",
+			"icon": "📱",
+			"search_terms": ["Samsung S26 Ultra", "Galaxy S26 Ultra"],
+			"min_price": 1000,
+			"max_price": 1500,
+			"alert_threshold": 75,
+			"rule_preset": "custom",
+			"custom_rule": "price > 0 && price <= 1350 && score >= 75"
+		}`
+
+		req := httptest.NewRequest(http.MethodPost, "/api/products", strings.NewReader(newProdJSON))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		server.httpServer.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		// Verify product is in GET /api/products
+		getReq := httptest.NewRequest(http.MethodGet, "/api/products", nil)
+		getRec := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(getRec, getReq)
+
+		if !strings.Contains(getRec.Body.String(), "samsung-s26-ultra") {
+			t.Errorf("Newly created product not found in GET /api/products")
+		}
+	})
+
+	// Test 6: DELETE /api/products (Safeguard oticon-connectclip & delete custom product)
+	t.Run("DELETE /api/products Safeguard and Deletion", func(t *testing.T) {
+		// Attempting to delete oticon-connectclip should fail
+		reqSafe := httptest.NewRequest(http.MethodDelete, "/api/products?id=oticon-connectclip", nil)
+		recSafe := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(recSafe, reqSafe)
+
+		if recSafe.Code != http.StatusBadRequest {
+			t.Errorf("Expected HTTP 400 when attempting to delete oticon-connectclip, got %d", recSafe.Code)
+		}
+
+		// Deleting samsung-s26-ultra should succeed
+		reqDel := httptest.NewRequest(http.MethodDelete, "/api/products?id=samsung-s26-ultra", nil)
+		recDel := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(recDel, reqDel)
+
+		if recDel.Code != http.StatusOK {
+			t.Errorf("Expected HTTP 200 when deleting product, got %d: %s", recDel.Code, recDel.Body.String())
+		}
+	})
+
+	// Test 7: GET /api/products/export and POST /api/products/import
+	t.Run("Export and Import Products", func(t *testing.T) {
+		expReq := httptest.NewRequest(http.MethodGet, "/api/products/export", nil)
+		expRec := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(expRec, expReq)
+
+		if expRec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200 on export, got %d", expRec.Code)
+		}
+		if !strings.Contains(expRec.Body.String(), "oticon-connectclip") {
+			t.Errorf("Export JSON missing oticon-connectclip")
+		}
+
+		// Import a new list
+		importJSON := `[
+			{
+				"id": "samsung-s25-ultra",
+				"name": "Samsung Galaxy S25 Ultra",
+				"category": "smartphones",
+				"icon": "📱",
+				"search_terms": ["S25 Ultra"],
+				"max_price": 1200,
+				"alert_threshold": 70,
+				"rule_preset": "great_deal"
+			}
+		]`
+		impReq := httptest.NewRequest(http.MethodPost, "/api/products/import", strings.NewReader(importJSON))
+		impReq.Header.Set("Content-Type", "application/json")
+		impRec := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(impRec, impReq)
+
+		if impRec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200 on import, got %d: %s", impRec.Code, impRec.Body.String())
+		}
+	})
+
+	// Test 8: POST /api/products/validate-rule
+	t.Run("POST /api/products/validate-rule", func(t *testing.T) {
+		validReq := `{
+			"rule": "price <= target_max_price && score >= alert_threshold",
+			"price": 850,
+			"score": 90,
+			"target_max_price": 900,
+			"alert_threshold": 70
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/products/validate-rule", strings.NewReader(validReq))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		server.httpServer.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected HTTP 200 on validate-rule, got %d", rec.Code)
+		}
+
+		var res map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &res)
+		if res["valid"] != true || res["passes"] != true {
+			t.Errorf("Expected valid=true and passes=true, got %+v", res)
+		}
+	})
 }
 

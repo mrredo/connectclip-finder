@@ -140,7 +140,7 @@ func main() {
 		fbAdapter,
 	)
 
-	// 8. Initialize Scheduler
+	// 8. Initialize Scheduler & Multi-Product Configuration
 	sched := scheduler.NewScheduler(
 		cfg.ScanInterval,
 		cfg.MinAlertScore,
@@ -150,6 +150,12 @@ func main() {
 		repo,
 		telegram,
 	)
+
+	// Load products from SQLite DB (seeded on startup from products.json or defaults)
+	dbProducts, err := repo.GetAllProducts(context.Background())
+	if err == nil && len(dbProducts) > 0 {
+		cfg.Products = dbProducts
+	}
 	sched.SetProducts(cfg.Products)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
